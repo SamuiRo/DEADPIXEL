@@ -12,7 +12,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
-namespace CrashDoctor
+namespace DeadPixel
 {
     // ================================================================ модель
     class DiskInfo
@@ -139,7 +139,7 @@ namespace CrashDoctor
                 double.TryParse(c[2], NumberStyles.Float, CultureInfo.InvariantCulture, out secs);
                 int.TryParse(c[3], out disk);
                 res.Add(new DiskEvent { Time = t, Kind = "stall", Disk = disk, Letter = c[4], Seconds = secs,
-                    Text = string.Format("не відповідав {0:0} с (виявлено CrashDoctor)", secs) });
+                    Text = string.Format("не відповідав {0:0} с (виявлено DEADPIXEL)", secs) });
             }
             return res;
         }

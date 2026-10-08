@@ -8,7 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace CrashDoctor
+namespace DeadPixel
 {
     class TrayApp : ApplicationContext
     {
@@ -42,7 +42,7 @@ namespace CrashDoctor
             BuildMenu();
             tray.ContextMenuStrip = menu;
             tray.Icon = icoOk;
-            tray.Text = "CrashDoctor";
+            tray.Text = "DEADPIXEL";
             tray.Visible = true;
             tray.DoubleClick += (s, e) => ShowDashboard(null);
             tray.BalloonTipClicked += (s, e) => ShowDashboard("Краші");
@@ -52,7 +52,7 @@ namespace CrashDoctor
             Events.NewEvent += it => ui.Post(_ => OnLiveEvent(it), null);
             Sampler.Stalls.StallDetected += st => ui.Post(_ =>
             {
-                Events.AddExternal(new EvItem { Time = st.Time, Category = "Диск", Source = "CrashDoctor", Id = 0, Level = 3, Text = st.Text });
+                Events.AddExternal(new EvItem { Time = st.Time, Category = "Диск", Source = "DEADPIXEL", Id = 0, Level = 3, Text = st.Text });
                 if (Settings.NotifyDisk && st.Seconds >= 10)
                     Notify("stall:" + st.Disk, TimeSpan.FromMinutes(10), "Диск не відповідав " + st.Seconds.ToString("0") + " с", st.Text, ToolTipIcon.Warning);
             }, null);
@@ -198,7 +198,7 @@ namespace CrashDoctor
                 recent = Events.Items.Any(e => (e.Category == "GPU" || e.Category == "WHEA") && e.Time > DateTime.Now.AddHours(-24));
             tray.Icon = unseenCrash ? icoAlert : recent ? icoWarn : icoOk;
             var s = Sampler.Last;
-            string tip = "CrashDoctor";
+            string tip = "DEADPIXEL";
             if (s != null)
             {
                 if (!double.IsNaN(s.GpuTemp)) tip += string.Format("\nGPU {0:0}°C {1:0}W {2}", s.GpuTemp, s.GpuPower, s.PState);
@@ -228,15 +228,15 @@ namespace CrashDoctor
 
         public void RunFullReport()
         {
-            var cmd = Path.Combine(Program.BaseDir, "CrashDoctor.cmd");
+            var cmd = Path.Combine(Program.BaseDir, "DeadPixel.cmd");
             if (File.Exists(cmd)) Open(cmd);
-            else MessageBox.Show("Не знайдено " + cmd, "CrashDoctor");
+            else MessageBox.Show("Не знайдено " + cmd, "DEADPIXEL");
         }
 
         public static void Open(string path)
         {
             try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
-            catch (Exception ex) { MessageBox.Show(ex.Message, "CrashDoctor"); }
+            catch (Exception ex) { MessageBox.Show(ex.Message, "DEADPIXEL"); }
         }
 
         DateTime ReadSeen()

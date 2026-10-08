@@ -5,7 +5,7 @@ using System.Linq;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace CrashDoctor
+namespace DeadPixel
 {
     // Прості налаштування у data\settings.ini (ключ=значення). Кожне публічне поле — один параметр.
     class Settings
@@ -66,14 +66,14 @@ namespace CrashDoctor
         {
             get
             {
-                using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) return k != null && k.GetValue("CrashDoctor") != null;
+                using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) return k != null && k.GetValue("DeadPixel") != null;
             }
             set
             {
                 using (var k = Registry.CurrentUser.CreateSubKey(RunKey))
                 {
-                    if (value) k.SetValue("CrashDoctor", "\"" + Application.ExecutablePath + "\"");
-                    else k.DeleteValue("CrashDoctor", false);
+                    if (value) k.SetValue("DeadPixel", "\"" + Application.ExecutablePath + "\"");
+                    else k.DeleteValue("DeadPixel", false);
                 }
             }
         }

@@ -9,7 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
-namespace CrashDoctor
+namespace DeadPixel
 {
     // ================================================================ контекст одного краша
     static class CrashAnalyzer
@@ -122,7 +122,7 @@ namespace CrashDoctor
             sb.AppendLine();
             sb.AppendLine("Обставини:");
             var s = c.LastSample;
-            if (s == null) sb.AppendLine("  чорна скринька не має даних для цього моменту (CrashDoctor тоді не працював).");
+            if (s == null) sb.AppendLine("  чорна скринька не має даних для цього моменту (DEADPIXEL тоді не працював).");
             else
             {
                 var idle = WasIdle(c);
@@ -512,7 +512,7 @@ namespace CrashDoctor
             // На старих збірках Windows 10 / LTSC winget може не бути — тоді відкриваємо сторінку завантаження
             bool hasWinget = File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WindowsApps\winget.exe"));
             if (!hasWinget) { TrayApp.Open("https://aka.ms/windbg/download"); return; }
-            Process.Start(new ProcessStartInfo("cmd.exe", "/k winget install --id Microsoft.WinDbg -e --accept-package-agreements && echo. && echo Готово. Поверніться в CrashDoctor і натисніть «Аналізувати».") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("cmd.exe", "/k winget install --id Microsoft.WinDbg -e --accept-package-agreements && echo. && echo Готово. Поверніться в DEADPIXEL і натисніть «Аналізувати».") { UseShellExecute = true });
         }
     }
 
@@ -526,7 +526,7 @@ namespace CrashDoctor
             Directory.CreateDirectory(stage);
 
             var sb = new StringBuilder();
-            sb.AppendLine("CrashDoctor — пакет для діагностики, " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + ", " + Environment.MachineName);
+            sb.AppendLine("DEADPIXEL — пакет для діагностики, " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + ", " + Environment.MachineName);
             sb.AppendLine(new string('=', 80));
             sb.AppendLine(SystemInfo.Build(app));
             sb.AppendLine(new string('=', 80));
@@ -573,7 +573,7 @@ namespace CrashDoctor
             }
 
             var packs = Directory.CreateDirectory(Path.Combine(Program.DataDir, "packs")).FullName;
-            var zip = Path.Combine(packs, "CrashDoctor-" + Environment.MachineName + "-" + stamp + ".zip");
+            var zip = Path.Combine(packs, "DeadPixel-" + Environment.MachineName + "-" + stamp + ".zip");
             if (File.Exists(zip)) File.Delete(zip);
             ZipFile.CreateFromDirectory(stage, zip, CompressionLevel.Optimal, false);
             try { Directory.Delete(Path.Combine(Program.DataDir, "pack-tmp"), true); } catch { }

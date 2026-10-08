@@ -1,12 +1,12 @@
 ﻿<#
 .SYNOPSIS
-  CrashDoctor - зводить у один звіт усе, що Windows записала про падіння, BSOD,
+  DEADPIXEL - зводить у один звіт усе, що Windows записала про падіння, BSOD,
   зависання відеодрайвера (TDR), апаратні помилки (WHEA) та збої дисків/програм.
 
 .EXAMPLE
-  .\CrashDoctor.ps1                # останні 14 днів, HTML-звіт відкриється у браузері
-  .\CrashDoctor.ps1 -Days 60       # за 60 днів
-  .\CrashDoctor.ps1 -NoOpen        # не відкривати звіт автоматично
+  .\DeadPixel.ps1                # останні 14 днів, HTML-звіт відкриється у браузері
+  .\DeadPixel.ps1 -Days 60       # за 60 днів
+  .\DeadPixel.ps1 -NoOpen        # не відкривати звіт автоматично
 #>
 param(
     [int]$Days = 14,
@@ -60,8 +60,8 @@ function Get-Ev($filter, [int]$max = 2000) {
     @(Get-WinEvent -FilterHashtable $filter -MaxEvents $max -ErrorAction SilentlyContinue)
 }
 
-Write-Host "CrashDoctor: збираю дані за $Days днів..." -ForegroundColor Cyan
-if (-not $isAdmin) { Write-Host "  (без прав адміністратора частина даних недоступна — запускайте через CrashDoctor.cmd)" -ForegroundColor Yellow }
+Write-Host "DEADPIXEL: збираю дані за $Days днів..." -ForegroundColor Cyan
+if (-not $isAdmin) { Write-Host "  (без прав адміністратора частина даних недоступна — запускайте через DeadPixel.cmd)" -ForegroundColor Yellow }
 
 # --- 1. Непередбачені перезавантаження ------------------------------------
 $unexpected = Get-Ev @{LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power'; Id = 41 }
@@ -208,8 +208,8 @@ function Table($rows, [string[]]$cols) {
 
 $stamp = Get-Date -Format 'yyyy-MM-dd_HH-mm'
 New-Item -ItemType Directory -Force $OutDir | Out-Null
-$htmlPath = Join-Path $OutDir "CrashDoctor_$stamp.html"
-$txtPath  = Join-Path $OutDir "CrashDoctor_$stamp.txt"
+$htmlPath = Join-Path $OutDir "DeadPixel_$stamp.html"
+$txtPath  = Join-Path $OutDir "DeadPixel_$stamp.txt"
 
 $findingsHtml = ($findings | ForEach-Object { "<div class='f $($_.Level)'><b>$(Enc $_.Title)</b><p>$(Enc $_.Text)</p></div>" }) -join "`n"
 $tdrRows = $tdr | Select-Object -First 40 | ForEach-Object {
@@ -222,7 +222,7 @@ $dumpRows = $minidumps | ForEach-Object { [pscustomobject]@{ Time = $_.LastWrite
 
 $html = @"
 <!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CrashDoctor $stamp</title>
+<title>DEADPIXEL $stamp</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--fg:#1c1f24;--muted:#6b7280;--line:#e3e6ea;--crit:#c62828;--warn:#b26a00;--ok:#2e7d32}
 @media (prefers-color-scheme:dark){:root{--bg:#15171b;--card:#1e2126;--fg:#e6e8eb;--muted:#9aa1ab;--line:#2c3037;--crit:#ef5350;--warn:#ffb74d;--ok:#66bb6a}}
@@ -235,7 +235,7 @@ main{max-width:1200px;margin:auto}h1{margin:0 0 4px}h2{margin:28px 0 8px;font-si
 th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{color:var(--muted);font-weight:600}
 code{font-family:Consolas,monospace}
 </style></head><body><main>
-<h1>CrashDoctor</h1>
+<h1>DEADPIXEL</h1>
 <div class="muted">$(Enc $env:COMPUTERNAME) · звіт від $(Get-Date -Format 'yyyy-MM-dd HH:mm') · період: $Days днів · адмін: $isAdmin</div>
 
 <h2>Висновки</h2>
@@ -281,7 +281,7 @@ $html | Out-File -Encoding utf8 $htmlPath
 
 # Текстова версія — зручно скопіювати в чат
 $txt = @()
-$txt += "CrashDoctor $stamp | $env:COMPUTERNAME | $Days днів"
+$txt += "DEADPIXEL $stamp | $env:COMPUTERNAME | $Days днів"
 $txt += "`n== ВИСНОВКИ =="
 $txt += $findings | ForEach-Object { "[$($_.Level.ToUpper())] $($_.Title)`n    $($_.Text)" }
 $txt += "`n== АВАРІЙНІ ПЕРЕЗАВАНТАЖЕННЯ =="

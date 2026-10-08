@@ -5,7 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace CrashDoctor
+namespace DeadPixel
 {
     // Графік останніх хвилин перед крашем: телеметрія, смуга P-state і позначки подій/процесів
     class TimelineChart : Control
@@ -81,7 +81,7 @@ namespace CrashDoctor
 
             if (rows.Count == 0)
             {
-                var msg = "Немає даних чорної скриньки для цього краша — CrashDoctor тоді не працював. Позначки подій нижче все одно показано.";
+                var msg = "Немає даних чорної скриньки для цього краша — DEADPIXEL тоді не працював. Позначки подій нижче все одно показано.";
                 TextRenderer.DrawText(g, msg, Font, a, t.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
             }
             else

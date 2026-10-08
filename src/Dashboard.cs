@@ -9,7 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace CrashDoctor
+namespace DeadPixel
 {
     class Dashboard : Form
     {
@@ -49,7 +49,7 @@ namespace CrashDoctor
         public Dashboard(TrayApp app)
         {
             this.app = app;
-            Text = "CrashDoctor";
+            Text = "DEADPIXEL";
             Font = new Font("Segoe UI", 9f);
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -278,7 +278,7 @@ namespace CrashDoctor
 
             Heading(t, "Температура CPU");
             var info = new Label { AutoSize = true, MaximumSize = new Size(700, 0), Tag = "muted", Margin = new Padding(3, 4, 3, 4),
-                Text = "Windows не надає температуру процесора Ryzen без спеціального драйвера. CrashDoctor автоматично підхоплює її з LibreHardwareMonitor, якщо той запущений (від адміністратора, можна згорнути в трей)." };
+                Text = "Windows не надає температуру процесора Ryzen без спеціального драйвера. DEADPIXEL автоматично підхоплює її з LibreHardwareMonitor, якщо той запущений (від адміністратора, можна згорнути в трей)." };
             t.Controls.Add(info);
             t.SetColumnSpan(info, 2);
             var status = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 4), Tag = "warn" };
@@ -675,7 +675,7 @@ namespace CrashDoctor
                     BeginInvoke(new Action(() =>
                     {
                         b.Enabled = true; b.Text = old;
-                        if (err != null) MessageBox.Show(this, "Не вдалося зібрати пакет: " + err, "CrashDoctor");
+                        if (err != null) MessageBox.Show(this, "Не вдалося зібрати пакет: " + err, "DEADPIXEL");
                         else System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + zip + "\"");
                     }));
                 }

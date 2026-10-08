@@ -1,4 +1,4 @@
-﻿// CrashDoctor Tray — легка трей-програма: пише "чорну скриньку" стану GPU/CPU, стежить за подіями
+﻿// DEADPIXEL Tray — легка трей-програма: пише "чорну скриньку" стану GPU/CPU, стежить за подіями
 // Windows у реальному часі (TDR, WHEA, диски, USB), після перезавантаження показує, що було перед крашем.
 // Збирається штатним компілятором .NET Framework 4.x (C# 5) — див. build.cmd.
 using System;
@@ -7,14 +7,14 @@ using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace CrashDoctor
+namespace DeadPixel
 {
     static class Program
     {
         public static string BaseDir = AppDomain.CurrentDomain.BaseDirectory;
         public static string DataDir = Path.Combine(BaseDir, "data");
 
-        // Дані поруч з exe; якщо туди писати не можна (напр. Program Files) — у %LOCALAPPDATA%\CrashDoctor
+        // Дані поруч з exe; якщо туди писати не можна (напр. Program Files) — у %LOCALAPPDATA%\DeadPixel
         static void ResolveDataDir()
         {
             try
@@ -26,7 +26,7 @@ namespace CrashDoctor
             }
             catch
             {
-                DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CrashDoctor");
+                DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeadPixel");
                 Directory.CreateDirectory(DataDir);
             }
         }
@@ -41,8 +41,8 @@ namespace CrashDoctor
             if (args.Length >= 2 && args[0] == "--copydumps") { DiagPack.CopyMinidumps(args[1]); return; }
 
             bool created;
-            var mutex = new Mutex(true, "CrashDoctorTray_SingleInstance", out created);
-            if (!created) { MessageBox.Show("CrashDoctor вже запущено — іконка в треї.", "CrashDoctor"); return; }
+            var mutex = new Mutex(true, "DeadPixel_SingleInstance", out created);
+            if (!created) { MessageBox.Show("DEADPIXEL вже запущено — іконка в треї.", "DEADPIXEL"); return; }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             var app = new TrayApp();
