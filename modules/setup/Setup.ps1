@@ -65,11 +65,38 @@ function Read-Defs([string]$dir) {
 $AllRecipes = @(Read-Defs (Join-Path $PSScriptRoot 'recipes'))
 $AllProfiles = @(Read-Defs (Join-Path $PSScriptRoot 'profiles'))
 
-# Крок - рядок або @{ Text = '...'; Run = 'що відкрити' } (devmgmt.msc, ms-settings:..., control.exe /name ...)
+# Крок - рядок (ручна дія) або хеш-таблиця:
+#   Text     що зробити ({Param} підставляється);  Hint - пояснення "чому"
+#   Run      команда PowerShell, яку GUI виконає кнопкою ▶ ({Param} підставляється як рядок у лапках)
+#   Expect   regex: крок успішний, лише якщо вивід йому відповідає (інакше - лише код виходу)
+#   If       'ok' | 'fail': крок діє, лише якщо попередня команда вдалася / не вдалася
+#   Open     що відкрити (devmgmt.msc, ms-settings:..., control.exe /name ...)
+#   Reboot   'restart' | 'firmware' (у BIOS/UEFI): прогрес зберігається, після перезавантаження GUI продовжить
+#   Admin    $true - команді потрібні права адміністратора;  Confirm - текст підтвердження перед запуском
+function ConvertTo-Step($s) {
+    if ($s -is [string]) { $s = @{ Text = $s } }
+    [pscustomobject]@{
+        Text = $s.Text; Hint = $s.Hint; Run = $s.Run; Expect = $s.Expect; If = $s.If; Open = $s.Open
+        Reboot = $(if ($s.Reboot -eq 'firmware') { 'firmware' } elseif ($s.Reboot) { 'restart' } else { $null })
+        Admin = [bool]$s.Admin; Confirm = $s.Confirm
+    }
+}
+
 function Get-Steps($def) {
-    @($def.Steps | Where-Object { $_ } | ForEach-Object {
-        if ($_ -is [string]) { [pscustomobject]@{ Text = $_; Run = $null } }
-        else { [pscustomobject]@{ Text = $_.Text; Run = $_.Run } }
+    @($def.Steps | Where-Object { $_ } | ForEach-Object { ConvertTo-Step $_ })
+}
+
+# Вкладки-сценарії рецепта: @{ Id; Title; Description; Params = @(@{ Name; Title; Default; Pattern; Hint }); Steps }
+function Get-Tabs($r) {
+    @($r.Tabs | Where-Object { $_ } | ForEach-Object {
+        $t = $_
+        [pscustomobject]@{
+            Id = $(if ($t.Id) { $t.Id } else { $t.Title }); Title = $t.Title; Description = $t.Description
+            Params = @($t.Params | Where-Object { $_ } | ForEach-Object {
+                [pscustomobject]@{ Name = $_.Name; Title = $_.Title; Default = [string]$_.Default; Pattern = $_.Pattern; Hint = $_.Hint }
+            })
+            Steps = @(Get-Steps $t)
+        }
     })
 }
 
@@ -239,7 +266,7 @@ function Get-Catalog {
             $r = $_
             [pscustomobject]@{
                 Name = $r.Name; Title = $r.Title; Description = $r.Description; Reboot = [bool]$r.Reboot
-                HasBackup = [bool](Find-Backup $r.Name); Steps = @(Get-Steps $r)
+                HasBackup = [bool](Find-Backup $r.Name); Steps = @(Get-Steps $r); Tabs = @(Get-Tabs $r)
                 Items = @($r.Items | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Title = $_.Title; Hint = $_.Hint; DesiredText = (Format-Value $_ $_.Desired) } })
             }
         })
@@ -261,12 +288,13 @@ function Write-Row([string]$tag, [string]$color, [string]$title, [string]$detail
 
 function Write-Steps($def) {
     $steps = @(Get-Steps $def)
-    if ($def.Reboot) { $steps += [pscustomobject]@{ Text = 'Перезавантажте ПК, щоб зміни набули чинності.'; Run = $null } }
+    if ($def.Reboot) { $steps += ConvertTo-Step 'Перезавантажте ПК, щоб зміни набули чинності.' }
     if ($steps.Count -eq 0) { return }
     Write-Host '  Що зробити вручну:' -ForegroundColor Cyan
     foreach ($s in $steps) {
         Write-Host "   - $($s.Text)" -NoNewline
-        if ($s.Run) { Write-Host "  [$($s.Run)]" -ForegroundColor DarkGray } else { Write-Host }
+        $extra = if ($s.Run) { $s.Run } else { $s.Open }
+        if ($extra) { Write-Host "  [$extra]" -ForegroundColor DarkGray } else { Write-Host }
     }
 }
 
@@ -294,7 +322,11 @@ function Show-List {
     Write-Host 'Профілі:' -ForegroundColor Cyan
     foreach ($p in $AllProfiles) { Write-Host ('  {0,-16} {1}  [{2}]' -f $p.Name, $p.Title, (@($p.Recipes) -join ', ')) }
     Write-Host 'Рецепти:' -ForegroundColor Cyan
-    foreach ($r in $AllRecipes) { Write-Host ('  {0,-16} {1}' -f $r.Name, $r.Title) }
+    foreach ($r in $AllRecipes) {
+        Write-Host ('  {0,-16} {1}' -f $r.Name, $r.Title) -NoNewline
+        $tabs = @(Get-Tabs $r)
+        if ($tabs.Count) { Write-Host ("  [сценарії в GUI: {0}]" -f (($tabs | ForEach-Object { $_.Title }) -join ', ')) -ForegroundColor DarkGray } else { Write-Host }
+    }
 }
 
 # ---------------------------------------------------------------- запуск
