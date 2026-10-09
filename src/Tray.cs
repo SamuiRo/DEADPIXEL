@@ -78,7 +78,7 @@ namespace DeadPixel
             menu.Items.Add("Повний звіт (HTML)", null, (s, e) => RunFullReport());
             menu.Items.Add("Папка чорної скриньки", null, (s, e) => Open(Program.DataDir));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Сетап ПК (рецепти)…", null, (s, e) => RunModule(@"setup\Setup.cmd"));
+            menu.Items.Add("Сетап ПК (рецепти)…", null, (s, e) => RunModule(@"setup\SetupGui.exe"));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Налаштування…", null, (s, e) => ShowDashboard("Налаштування"));
             menu.Items.Add(new ToolStripSeparator());

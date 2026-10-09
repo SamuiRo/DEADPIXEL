@@ -1,11 +1,15 @@
 ﻿# PCIe Link State Power Management. 0 = вимкнено, 1 = помірне, 2 = максимальне енергозбереження.
-# Агресивний ASPM - часта причина зависань GPU/NVMe (TDR, зникнення диска) після виходу зі сну.
 @{
-    Title       = 'PCIe ASPM: помірне енергозбереження (від мережі)'
-    Description = 'powercfg SUB_PCIEXPRESS ASPM у поточній схемі живлення'
+    Title       = 'PCIe ASPM вимкнено (від мережі)'
+    Description = 'Енергозбереження лінії PCIe у поточній схемі живлення. Вимкнення прибирає зависання GPU/NVMe на виході з low-power станів.'
     Items       = @(
         @{ Kind = 'Power'; Id = 'aspm-ac'; Title = 'PCIe ASPM (від мережі)'
-           Sub = 'SUB_PCIEXPRESS'; Setting = 'ASPM'; Power = 'AC'; Desired = 1
-           Labels = @{ 0 = 'вимкнено'; 1 = 'помірне'; 2 = 'максимальне' } }
+           Sub = 'SUB_PCIEXPRESS'; Setting = 'ASPM'; Power = 'AC'; Desired = 0
+           Labels = @{ 0 = 'вимкнено'; 1 = 'помірне'; 2 = 'максимальне' }
+           Hint = 'Коли лінія PCIe "засинає", відеокарта або NVMe-диск інколи не прокидаються вчасно — Windows бачить це як зависання драйвера (TDR, подія 4101) або зникнення диска. Вимкнення ASPM коштує кілька ватів у простої і прибирає цей клас збоїв.' }
+    )
+    Steps       = @(
+        'Якщо в BIOS/UEFI є "Native ASPM" або "PCIe ASPM Support" — вимкніть і там: коли BIOS не передав керування ASPM системі, налаштування Windows на нього не впливає.'
+        'Після зміни поспостерігайте за подіями GPU у DEADPIXEL (вкладка "Події") кілька днів.'
     )
 }

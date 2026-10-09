@@ -81,7 +81,6 @@ namespace DeadPixel
                 var ll = c as LinkLabel;
                 if (ll != null) { ll.LinkColor = Accent; ll.ActiveLinkColor = Accent; ll.VisitedLinkColor = Accent; }
             }
-            else if (c is Chart) { c.BackColor = Surface; c.ForeColor = Fg; }
             else
             {
                 c.BackColor = tag == "surface" ? Surface : tag == "border" ? Border : Bg; c.ForeColor = Fg;

@@ -2,27 +2,31 @@
 .SYNOPSIS
   DEADPIXEL Setup - групові налаштування Windows за рецептами: перевірити, застосувати, відкотити.
 .DESCRIPTION
-  Рецепт - файл recipes\<назва>.ps1, що повертає @{ Title; Description; Items }.
+  Рецепт - recipes\<назва>.ps1, що повертає @{ Title; Description; Items; Steps; Reboot }.
+  Профіль - profiles\<назва>.ps1: @{ Title; Description; Recipes = @(...); Steps }.
   Кожен пункт уміє лише прочитати поточне значення і записати нове; з цього випливає все інше:
   перевірка порівнює з Desired, застосування спершу зберігає старі значення в бекап,
   відкат повертає саме їх (а не "протилежне" значення).
+  Логіка повертає об'єкти-результати; консоль і GUI (SetupGui.exe, через -OutFile) лише показують їх.
 .EXAMPLE
   .\Setup.ps1                                  # меню
   .\Setup.ps1 -List
   .\Setup.ps1 -Recipe disk-power               # перевірка (за замовчуванням); код виходу = кількість відхилень
   .\Setup.ps1 -Recipe disk-power -Apply
   .\Setup.ps1 -Recipe disk-power -Revert
+  .\Setup.ps1 -ProfileName new-pc -Apply       # усі рецепти профілю
   .\Setup.ps1 -Recipe *                        # аудит ПК за всіма рецептами
 #>
 param(
-    [string]$Recipe,
+    [string[]]$Recipe,
+    [string]$ProfileName,
     [switch]$List,
     [switch]$Apply,
-    [switch]$Revert
+    [switch]$Revert,
+    [string]$OutFile   # машинний режим для GUI: результат як JSON у файл, без виводу в консоль
 )
 
 $ErrorActionPreference = 'Stop'
-$RecipeDir = Join-Path $PSScriptRoot 'recipes'
 $Absent = '<absent>'   # значення реєстру, якого немає: відкат до нього = видалення
 
 # Дані поруч із програмою (data\setup); якщо туди писати не можна - %LOCALAPPDATA%\DeadPixel\setup (як у трей-програми)
@@ -39,19 +43,51 @@ function Get-BackupDir {
     $dir
 }
 
+function Find-Backup([string]$name) {
+    Get-ChildItem (Get-BackupDir) -Filter "$name-*.json" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
+}
+
 function Test-Admin {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# ---------------------------------------------------------------- рецепти
+# ---------------------------------------------------------------- рецепти та профілі
 
-function Get-Recipes([string]$pattern) {
-    if (-not $pattern) { $pattern = '*' }
-    Get-ChildItem $RecipeDir -Filter '*.ps1' | Where-Object { $_.BaseName -like $pattern } | Sort-Object BaseName | ForEach-Object {
-        $r = & $_.FullName
-        $r.Name = $_.BaseName
-        $r
+function Read-Defs([string]$dir) {
+    if (-not (Test-Path $dir)) { return }
+    Get-ChildItem $dir -Filter '*.ps1' | Sort-Object BaseName | ForEach-Object {
+        $d = & $_.FullName
+        $d.Name = $_.BaseName
+        $d
     }
+}
+
+$AllRecipes = @(Read-Defs (Join-Path $PSScriptRoot 'recipes'))
+$AllProfiles = @(Read-Defs (Join-Path $PSScriptRoot 'profiles'))
+
+# Крок - рядок або @{ Text = '...'; Run = 'що відкрити' } (devmgmt.msc, ms-settings:..., control.exe /name ...)
+function Get-Steps($def) {
+    @($def.Steps | Where-Object { $_ } | ForEach-Object {
+        if ($_ -is [string]) { [pscustomobject]@{ Text = $_; Run = $null } }
+        else { [pscustomobject]@{ Text = $_.Text; Run = $_.Run } }
+    })
+}
+
+# Рецепти для -Recipe (шаблони) або -ProfileName, у порядку, як їх перелічено
+function Resolve-Recipes {
+    if ($ProfileName) {
+        $p = $AllProfiles | Where-Object { $_.Name -eq $ProfileName } | Select-Object -First 1
+        if (-not $p) { throw "Профіль '$ProfileName' не знайдено. Список: Setup.ps1 -List" }
+        $patterns = @($p.Recipes)
+    } else { $patterns = @($Recipe) }
+    $seen = @{}
+    $res = @()
+    foreach ($pat in $patterns) {
+        $found = @($AllRecipes | Where-Object { $_.Name -like $pat })
+        if ($found.Count -eq 0) { throw "Рецепт '$pat' не знайдено. Список: Setup.ps1 -List" }
+        foreach ($r in $found) { if (-not $seen[$r.Name]) { $seen[$r.Name] = $true; $res += $r } }
+    }
+    $res
 }
 
 # ---------------------------------------------------------------- типи пунктів
@@ -60,6 +96,7 @@ function Get-Recipes([string]$pattern) {
 # FirewallRule: Name (не DisplayName - той локалізований). Значення - 'True'/'False'.
 # Registry: Path, Name, Type (DWord за замовчуванням). Значення - дані або '<absent>'.
 # Custom: Get = { ... }, Set = { param($value) ... }.
+# Спільні поля: Id (за ним зіставляється бекап), Title, Desired, Hint, Labels = @{ 0 = '...' }.
 
 function Get-Value($item) {
     switch ($item.Kind) {
@@ -108,53 +145,51 @@ function Set-Value($item, $value) {
 
 function Format-Value($item, $value) {
     if ($null -eq $value) { return '—' }
-    if ($item.Labels -and $item.Labels.ContainsKey([int]$value)) { return "$value ($($item.Labels[[int]$value]))" }
+    $n = $value -as [int]
+    if ($item.Labels -and $null -ne $n -and $item.Labels.ContainsKey($n)) { return "$value ($($item.Labels[$n]))" }
     "$value"
 }
 
 function Test-Same($a, $b) { "$a" -eq "$b" }
 
-# ---------------------------------------------------------------- дії
+# ---------------------------------------------------------------- дії (повертають результати, нічого не друкують)
 
-function Write-Row([string]$tag, [ConsoleColor]$color, [string]$title, [string]$detail) {
-    Write-Host ('  [{0,-4}] ' -f $tag) -ForegroundColor $color -NoNewline
-    Write-Host $title -NoNewline
-    if ($detail) { Write-Host "  $detail" -ForegroundColor DarkGray } else { Write-Host }
-}
-
-function Write-Header($r) {
-    Write-Host
-    Write-Host "$($r.Name) — $($r.Title)" -ForegroundColor Cyan
-    if ($r.Description) { Write-Host "  $($r.Description)" -ForegroundColor DarkGray }
-}
-
-# Повертає кількість пунктів, що відрізняються від бажаного (недоступні не рахуються)
-function Invoke-Check($r) {
-    Write-Header $r
-    $diff = 0
-    foreach ($it in $r.Items) {
-        try { $cur = Get-Value $it }
-        catch { Write-Row 'N/A' DarkGray $it.Title $_.Exception.Message; continue }
-        if (Test-Same $cur $it.Desired) { Write-Row 'OK' Green $it.Title (Format-Value $it $cur) }
-        else {
-            $diff++
-            Write-Row 'DIFF' Yellow $it.Title ("зараз {0}, треба {1}" -f (Format-Value $it $cur), (Format-Value $it $it.Desired))
-        }
+# Status: OK | DIFF | NA (недоступно) | SET (застосовано) | BACK (відкочено) | FAIL | SKIP
+function New-Result($r, $it, [string]$status, $cur, [string]$msg) {
+    [pscustomobject]@{
+        Recipe = $r.Name; Id = $it.Id; Title = $it.Title; Status = $status
+        CurrentText = $(if ($status -eq 'NA') { '' } else { Format-Value $it $cur })
+        DesiredText = Format-Value $it $it.Desired
+        Message = $msg
     }
-    $diff
 }
 
-function Invoke-Apply($r) {
-    Write-Header $r
+function New-Outcome($r, $results, [string]$backup, [string]$msg) {
+    [pscustomobject]@{
+        Recipe = $r.Name; Title = $r.Title; Results = @($results); Backup = $backup; Message = $msg
+        HasBackup = [bool](Find-Backup $r.Name)
+    }
+}
+
+function Test-Recipe($r) {
+    $results = foreach ($it in $r.Items) {
+        try { $cur = Get-Value $it }
+        catch { New-Result $r $it 'NA' $null $_.Exception.Message; continue }
+        New-Result $r $it $(if (Test-Same $cur $it.Desired) { 'OK' } else { 'DIFF' }) $cur ''
+    }
+    New-Outcome $r $results '' ''
+}
+
+function Invoke-ApplyRecipe($r) {
     # 1. Знімок: бекап пишемо ДО змін, щоб відкат був можливий навіть після збою посередині
-    $todo = @()
+    $results = @(); $todo = @()
     foreach ($it in $r.Items) {
         try { $cur = Get-Value $it }
-        catch { Write-Row 'N/A' DarkGray $it.Title $_.Exception.Message; continue }
-        if (Test-Same $cur $it.Desired) { Write-Row 'OK' Green $it.Title 'вже як треба' }
+        catch { $results += New-Result $r $it 'NA' $null $_.Exception.Message; continue }
+        if (Test-Same $cur $it.Desired) { $results += New-Result $r $it 'OK' $cur 'вже як треба' }
         else { $todo += [pscustomobject]@{ Item = $it; Old = $cur } }
     }
-    if ($todo.Count -eq 0) { Write-Host '  Нічого змінювати.' -ForegroundColor DarkGray; return }
+    if ($todo.Count -eq 0) { return New-Outcome $r $results '' 'Нічого змінювати.' }
     $backup = Join-Path (Get-BackupDir) ('{0}-{1:yyyyMMdd-HHmmss}.json' -f $r.Name, (Get-Date))
     [pscustomobject]@{
         Recipe = $r.Name; Time = (Get-Date).ToString('s'); Computer = $env:COMPUTERNAME
@@ -165,50 +200,128 @@ function Invoke-Apply($r) {
     foreach ($t in $todo) {
         $it = $t.Item
         try {
-            Set-Value $it $it.Desired
+            $null = Set-Value $it $it.Desired
             $now = Get-Value $it
-            if (Test-Same $now $it.Desired) { Write-Row 'SET' Green $it.Title ("{0} → {1}" -f (Format-Value $it $t.Old), (Format-Value $it $now)) }
-            else { Write-Row 'FAIL' Red $it.Title ("записано, але зараз {0}" -f (Format-Value $it $now)) }
+            if (Test-Same $now $it.Desired) { $results += New-Result $r $it 'SET' $now ('було ' + (Format-Value $it $t.Old)) }
+            else { $results += New-Result $r $it 'FAIL' $now 'записано, але значення не змінилося' }
         }
-        catch { Write-Row 'FAIL' Red $it.Title $_.Exception.Message }
+        catch { $results += New-Result $r $it 'FAIL' $t.Old $_.Exception.Message }
     }
-    Write-Host "  Бекап для відкату: $backup" -ForegroundColor DarkGray
+    New-Outcome $r $results $backup ''
 }
 
-function Invoke-Revert($r) {
-    Write-Header $r
-    $file = Get-ChildItem (Get-BackupDir) -Filter "$($r.Name)-*.json" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
-    if (-not $file) { Write-Host '  Немає бекапу — рецепт не застосовувався (або вже відкочено).' -ForegroundColor Yellow; return }
+function Invoke-RevertRecipe($r) {
+    $file = Find-Backup $r.Name
+    if (-not $file) { return New-Outcome $r @() '' 'Немає бекапу — рецепт не застосовувався або вже відкочено.' }
     $data = Get-Content $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-    Write-Host "  Бекап від $($data.Time)" -ForegroundColor DarkGray
-    $ok = $true
-    foreach ($b in $data.Items) {
+    $results = @(); $ok = $true
+    foreach ($b in @($data.Items)) {
         $it = $r.Items | Where-Object { $_.Id -eq $b.Id } | Select-Object -First 1
-        if (-not $it) { Write-Row 'SKIP' Yellow $b.Id 'пункту вже немає в рецепті'; continue }
-        try {
-            Set-Value $it $b.Value
-            Write-Row 'BACK' Green $it.Title (Format-Value $it (Get-Value $it))
+        if (-not $it) {
+            $results += [pscustomobject]@{ Recipe = $r.Name; Id = $b.Id; Title = $b.Id; Status = 'SKIP'; CurrentText = ''; DesiredText = ''; Message = 'пункту вже немає в рецепті' }
+            continue
         }
-        catch { $ok = $false; Write-Row 'FAIL' Red $it.Title $_.Exception.Message }
+        try {
+            $null = Set-Value $it $b.Value
+            $results += New-Result $r $it 'BACK' (Get-Value $it) ''
+        }
+        catch { $ok = $false; $results += New-Result $r $it 'FAIL' $null $_.Exception.Message }
     }
     # Використаний бекап позначаємо, щоб наступний відкат узяв попередній, а не цей самий
     if ($ok) { Rename-Item $file.FullName ($file.Name + '.reverted') }
+    New-Outcome $r $results '' "Повернуто значення з бекапу від $($data.Time)"
 }
 
-function Invoke-Recipes([string]$pattern, [string]$action) {
-    $recipes = @(Get-Recipes $pattern)
-    if ($recipes.Count -eq 0) { Write-Host "Рецепт '$pattern' не знайдено. Список: Setup.ps1 -List" -ForegroundColor Red; return -1 }
-    if ($action -ne 'Check' -and -not (Test-Admin)) {
-        Write-Host 'Для змін потрібні права адміністратора — запустіть через Setup.cmd.' -ForegroundColor Red; return -1
+function Get-Catalog {
+    [pscustomobject]@{
+        Error    = $null
+        Recipes  = @($AllRecipes | ForEach-Object {
+            $r = $_
+            [pscustomobject]@{
+                Name = $r.Name; Title = $r.Title; Description = $r.Description; Reboot = [bool]$r.Reboot
+                HasBackup = [bool](Find-Backup $r.Name); Steps = @(Get-Steps $r)
+                Items = @($r.Items | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Title = $_.Title; Hint = $_.Hint; DesiredText = (Format-Value $_ $_.Desired) } })
+            }
+        })
+        Profiles = @($AllProfiles | ForEach-Object {
+            [pscustomobject]@{ Name = $_.Name; Title = $_.Title; Description = $_.Description; Recipes = @($_.Recipes); Steps = @(Get-Steps $_) }
+        })
     }
-    $diff = 0
-    foreach ($r in $recipes) {
+}
+
+# ---------------------------------------------------------------- консоль
+
+$Colors = @{ OK = 'Green'; DIFF = 'Yellow'; NA = 'DarkGray'; SET = 'Green'; BACK = 'Cyan'; FAIL = 'Red'; SKIP = 'Yellow' }
+
+function Write-Row([string]$tag, [string]$color, [string]$title, [string]$detail) {
+    Write-Host ('  [{0,-4}] ' -f $tag) -ForegroundColor $color -NoNewline
+    Write-Host $title -NoNewline
+    if ($detail) { Write-Host "  $detail" -ForegroundColor DarkGray } else { Write-Host }
+}
+
+function Write-Steps($def) {
+    $steps = @(Get-Steps $def)
+    if ($def.Reboot) { $steps += [pscustomobject]@{ Text = 'Перезавантажте ПК, щоб зміни набули чинності.'; Run = $null } }
+    if ($steps.Count -eq 0) { return }
+    Write-Host '  Що зробити вручну:' -ForegroundColor Cyan
+    foreach ($s in $steps) {
+        Write-Host "   - $($s.Text)" -NoNewline
+        if ($s.Run) { Write-Host "  [$($s.Run)]" -ForegroundColor DarkGray } else { Write-Host }
+    }
+}
+
+function Write-Outcome($r, $o, [bool]$withSteps) {
+    Write-Host
+    Write-Host "$($r.Name) — $($r.Title)" -ForegroundColor Cyan
+    if ($r.Description) { Write-Host "  $($r.Description)" -ForegroundColor DarkGray }
+    foreach ($x in $o.Results) {
+        $detail = switch ($x.Status) {
+            'DIFF' { "зараз $($x.CurrentText), треба $($x.DesiredText)" }
+            'SET'  { "$($x.Message) → $($x.CurrentText)" }
+            'NA'   { $x.Message }
+            'FAIL' { $x.Message }
+            'SKIP' { $x.Message }
+            default { $x.CurrentText }
+        }
+        Write-Row $x.Status $Colors[$x.Status] $x.Title $detail
+    }
+    if ($o.Message) { Write-Host "  $($o.Message)" -ForegroundColor DarkGray }
+    if ($o.Backup) { Write-Host "  Бекап для відкату: $($o.Backup)" -ForegroundColor DarkGray }
+    if ($withSteps) { Write-Steps $r }
+}
+
+function Show-List {
+    Write-Host 'Профілі:' -ForegroundColor Cyan
+    foreach ($p in $AllProfiles) { Write-Host ('  {0,-16} {1}  [{2}]' -f $p.Name, $p.Title, (@($p.Recipes) -join ', ')) }
+    Write-Host 'Рецепти:' -ForegroundColor Cyan
+    foreach ($r in $AllRecipes) { Write-Host ('  {0,-16} {1}' -f $r.Name, $r.Title) }
+}
+
+# ---------------------------------------------------------------- запуск
+
+function Invoke-Action([string]$action) {
+    if ($action -ne 'Check' -and -not (Test-Admin)) { throw 'Для змін потрібні права адміністратора — запустіть через Setup.cmd або SetupGui.exe.' }
+    foreach ($r in Resolve-Recipes) {
         switch ($action) {
-            'Check'  { $diff += Invoke-Check $r }
-            'Apply'  { $null = Invoke-Apply $r }
-            'Revert' { $null = Invoke-Revert $r }
+            'Check'  { Test-Recipe $r }
+            'Apply'  { Invoke-ApplyRecipe $r }
+            'Revert' { Invoke-RevertRecipe $r }
         }
     }
+}
+
+function Invoke-Console([string]$action) {
+    $outcomes = @(Invoke-Action $action)
+    foreach ($o in $outcomes) {
+        $r = $AllRecipes | Where-Object { $_.Name -eq $o.Recipe }
+        Write-Outcome $r $o ($action -eq 'Apply')
+    }
+    if ($action -eq 'Apply' -and $ProfileName) {
+        $p = $AllProfiles | Where-Object { $_.Name -eq $ProfileName }
+        Write-Host; Write-Host "Профіль: $($p.Title)" -ForegroundColor Cyan
+        Write-Steps $p
+    }
+    $diff = @($outcomes | ForEach-Object { $_.Results } | Where-Object { $_.Status -eq 'DIFF' }).Count
     if ($action -eq 'Check') {
         Write-Host
         if ($diff -eq 0) { Write-Host 'Усе налаштовано як треба.' -ForegroundColor Green }
@@ -217,42 +330,48 @@ function Invoke-Recipes([string]$pattern, [string]$action) {
     $diff
 }
 
-function Show-List {
-    foreach ($r in Get-Recipes) {
-        Write-Host ('  {0,-16}' -f $r.Name) -ForegroundColor Cyan -NoNewline
-        Write-Host " $($r.Title)"
-    }
-}
-
 function Show-Menu {
-    $recipes = @(Get-Recipes)
     while ($true) {
+        $entries = @($AllProfiles | ForEach-Object { @{ Kind = 'profile'; Name = $_.Name; Title = "[профіль] $($_.Title)" } }) +
+                   @($AllRecipes | ForEach-Object { @{ Kind = 'recipe'; Name = $_.Name; Title = $_.Title } })
         Write-Host
         Write-Host 'DEADPIXEL Setup' -ForegroundColor Cyan
-        for ($i = 0; $i -lt $recipes.Count; $i++) { Write-Host ('  {0,2}. {1,-16} {2}' -f ($i + 1), $recipes[$i].Name, $recipes[$i].Title) }
+        for ($i = 0; $i -lt $entries.Count; $i++) { Write-Host ('  {0,2}. {1,-16} {2}' -f ($i + 1), $entries[$i].Name, $entries[$i].Title) }
         Write-Host '   *. перевірити все'
-        $sel = Read-Host 'Рецепт (Enter — вихід)'
+        $sel = Read-Host 'Вибір (Enter — вихід)'
         if (-not $sel) { return }
-        if ($sel -eq '*') { $null = Invoke-Recipes '*' 'Check'; continue }
-        $n = 0
-        if (-not [int]::TryParse($sel, [ref]$n) -or $n -lt 1 -or $n -gt $recipes.Count) { continue }
-        $name = $recipes[$n - 1].Name
-        $null = Invoke-Recipes $name 'Check'
-        $act = Read-Host '[A] застосувати, [R] відкотити, Enter — назад'
-        switch ($act.ToUpper()) {
-            'A' { $null = Invoke-Recipes $name 'Apply' }
-            'R' { $null = Invoke-Recipes $name 'Revert' }
+        try {
+            if ($sel -eq '*') { $script:Recipe = '*'; $script:ProfileName = $null; $null = Invoke-Console 'Check'; continue }
+            $n = 0
+            if (-not [int]::TryParse($sel, [ref]$n) -or $n -lt 1 -or $n -gt $entries.Count) { continue }
+            $e = $entries[$n - 1]
+            if ($e.Kind -eq 'profile') { $script:ProfileName = $e.Name; $script:Recipe = $null }
+            else { $script:Recipe = $e.Name; $script:ProfileName = $null }
+            $null = Invoke-Console 'Check'
+            switch ((Read-Host '[A] застосувати, [R] відкотити, Enter — назад').ToUpper()) {
+                'A' { $null = Invoke-Console 'Apply' }
+                'R' { $null = Invoke-Console 'Revert' }
+            }
         }
+        catch { Write-Host $_.Exception.Message -ForegroundColor Red }
     }
 }
 
-# ---------------------------------------------------------------- точка входу
-
 if (@($Apply, $Revert, $List | Where-Object { $_ }).Count -gt 1) { throw 'Вкажіть лише одне з -List, -Apply, -Revert' }
-if ($List) { Show-List; exit 0 }
-if (-not $Recipe) { Show-Menu; exit 0 }
 $action = if ($Apply) { 'Apply' } elseif ($Revert) { 'Revert' } else { 'Check' }
-$result = Invoke-Recipes $Recipe $action
+
+if ($OutFile) {
+    try {
+        $out = if ($List) { Get-Catalog } else { [pscustomobject]@{ Error = $null; Recipes = @(Invoke-Action $action) } }
+    }
+    catch { $out = [pscustomobject]@{ Error = $_.Exception.Message; Recipes = @() } }
+    ConvertTo-Json -InputObject $out -Depth 6 | Set-Content -Encoding UTF8 $OutFile
+    exit 0
+}
+
+if ($List) { Show-List; exit 0 }
+if (-not $Recipe -and -not $ProfileName) { Show-Menu; exit 0 }
+try { $diff = Invoke-Console $action }
+catch { Write-Host $_.Exception.Message -ForegroundColor Red; exit 255 }
 # Перевірка: код = кількість відхилень (0 - усе гаразд); 255 - помилка запуску
-if ($result -lt 0) { exit 255 }
-exit $(if ($action -eq 'Check') { [Math]::Min([int]$result, 254) } else { 0 })
+exit $(if ($action -eq 'Check') { [Math]::Min([int]$diff, 254) } else { 0 })

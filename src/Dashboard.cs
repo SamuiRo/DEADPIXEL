@@ -705,6 +705,7 @@ namespace DeadPixel
         public Chart(string title, Func<Theme> theme, Func<List<Sample>> source, ChartSeries[] series)
         {
             this.title = title; this.theme = theme; this.source = source; this.series = series;
+            Tag = "surface"; // фарбується темою як картка
             DoubleBuffered = true;
             SetStyle(ControlStyles.ResizeRedraw | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
         }
