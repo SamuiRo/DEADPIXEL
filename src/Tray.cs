@@ -78,6 +78,8 @@ namespace DeadPixel
             menu.Items.Add("Повний звіт (HTML)", null, (s, e) => RunFullReport());
             menu.Items.Add("Папка чорної скриньки", null, (s, e) => Open(Program.DataDir));
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Сетап ПК (рецепти)…", null, (s, e) => RunModule(@"setup\Setup.cmd"));
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Налаштування…", null, (s, e) => ShowDashboard("Налаштування"));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Вихід", null, (s, e) => ExitThread());
@@ -231,6 +233,14 @@ namespace DeadPixel
             var cmd = Path.Combine(Program.BaseDir, "DeadPixel.cmd");
             if (File.Exists(cmd)) Open(cmd);
             else MessageBox.Show("Не знайдено " + cmd, "DEADPIXEL");
+        }
+
+        // Модулі (modules\) — окремі процеси на вимогу: трей їх лише запускає і нічого не тримає в пам'яті
+        public static void RunModule(string relPath)
+        {
+            var path = Path.Combine(Program.BaseDir, "modules", relPath);
+            if (File.Exists(path)) Open(path);
+            else MessageBox.Show("Не знайдено модуль " + path, "DEADPIXEL");
         }
 
         public static void Open(string path)
