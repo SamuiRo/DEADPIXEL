@@ -411,7 +411,7 @@ namespace DeadPixel
             var idle = SystemInfo.PowerCfg("SUB_DISK DISKIDLE");
             var lpm = SystemInfo.PowerCfg("SUB_DISK 0b2d69d7-a2a1-449c-9680-f91c70521c60");
             sb.AppendLine("  Зупинка HDD при простої: " + (idle < 0 ? "?" : idle == 0 ? "ніколи" : (idle / 60) + " хв"));
-            sb.AppendLine("  Енергозбереження з'єднання SATA (AHCI LPM): " + (lpm < 0 ? "за замовчуванням (налаштування приховане)" : lpm == 0 ? "вимкнено (Active)" : lpm == 1 ? "HIPM" : lpm == 2 ? "DIPM" : lpm == 3 ? "HIPM+DIPM" : "найнижче споживання"));
+            sb.AppendLine("  Енергозбереження з'єднання SATA (AHCI LPM): " + (lpm < 0 ? "за замовчуванням (налаштування приховане)" : lpm == 0 ? "вимкнено (Active)" : lpm == 1 ? "HIPM" : lpm == 2 ? "HIPM+DIPM" : lpm == 3 ? "DIPM" : "найнижче споживання"));
 
             var tips = new List<string>();
             int resets = events.Count(e => e.Kind == "reset");

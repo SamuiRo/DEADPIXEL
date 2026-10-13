@@ -139,7 +139,7 @@ namespace DeadPixel
             try
             {
                 // Текст powercfg локалізований, тому без прив'язки до слів: два останні значення 0x… — це AC і DC
-                var ms = Regex.Matches(Run("/q SCHEME_CURRENT " + setting), @"0x([0-9a-fA-F]{8})\s*$", RegexOptions.Multiline);
+                var ms = Regex.Matches(Run("/qh SCHEME_CURRENT " + setting), @"0x([0-9a-fA-F]{8})\s*$", RegexOptions.Multiline);
                 return ms.Count >= 2 ? Convert.ToInt32(ms[ms.Count - 2].Groups[1].Value, 16) : -1;
             }
             catch { return -1; }

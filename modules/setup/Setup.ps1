@@ -128,7 +128,9 @@ function Resolve-Recipes {
 function Get-Value($item) {
     switch ($item.Kind) {
         'Power' {
-            $out = (powercfg /query SCHEME_CURRENT $item.Sub $item.Setting) -join "`n"
+            # /qh показує й приховані налаштування (напр. AHCI Link Power Management на свіжій Windows); /query їх не бачить
+            $out = (powercfg /qh SCHEME_CURRENT $item.Sub $item.Setting) -join "`n"
+            if ($LASTEXITCODE -ne 0) { $out = (powercfg /query SCHEME_CURRENT $item.Sub $item.Setting) -join "`n" }
             # Поточні AC/DC - завжди два останні 0x-числа (перед ними можуть бути Min/Max/Increment).
             # Неіснуюче налаштування powercfg повертає з кодом 0 і без цих рядків.
             $hex = [regex]::Matches($out, '0x[0-9a-fA-F]{8}')
@@ -193,7 +195,8 @@ function New-Result($r, $it, [string]$status, $cur, [string]$msg) {
 
 function New-Outcome($r, $results, [string]$backup, [string]$msg) {
     [pscustomobject]@{
-        Recipe = $r.Name; Title = $r.Title; Results = @($results); Backup = $backup; Message = $msg
+        # @($null) - це масив з одним $null; рецепт без пунктів (лише сценарії) дає саме його
+        Recipe = $r.Name; Title = $r.Title; Results = @($results | Where-Object { $_ }); Backup = $backup; Message = $msg
         HasBackup = [bool](Find-Backup $r.Name)
     }
 }

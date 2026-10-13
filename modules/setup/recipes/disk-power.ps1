@@ -20,4 +20,43 @@
         @{ Text = 'Диспетчер пристроїв → Контролери USB → кожен "USB Root Hub" / "Generic USB Hub" → Властивості → Керування живленням → зняти "Дозволити вимикати цей пристрій для економії енергії".'; Open = 'devmgmt.msc' }
         'Для NVMe: оновіть прошивку SSD утилітою виробника (Samsung Magician, WD Dashboard, Crucial Storage Executive тощо).'
     )
+
+    Tabs        = @(
+        @{ Id = 'disk-check'; Title = 'Перевірка дисків'
+           Description = 'Чи є скидання контролера і повтори операцій, що каже SMART, і онлайн-перевірка файлової системи. Нічого не змінює.'
+           Steps = @(
+               @{ Text = 'Скидання дисків контролером (storahci/stornvme 129) і повтори операцій (disk 153) за 14 днів, по днях.'
+                  Hint = '129 + 153 = диск не відповів вчасно і Windows скинула з''єднання: у цей момент відео/гра "висять" до хвилини, а Диспетчер завдань показує нуль активності. Найчастіша причина - енергозбереження SATA і зупинка HDD (пункти вище).'
+                  Run = "Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'storahci', 'stornvme', 'disk'; Id = 129, 153; StartTime = (Get-Date).AddDays(-14) } -ErrorAction SilentlyContinue | Group-Object { '{0:yyyy-MM-dd} {1} {2}' -f `$_.TimeCreated, `$_.ProviderName, `$_.Id } | Sort-Object Name | Format-Table Count, Name -AutoSize" }
+               @{ Text = 'Апаратні помилки (disk 7/154/51) і втрати запису (Ntfs 50/140) за 30 днів.'
+                  Hint = 'Ntfs 50/140 "Delayed Write Failed" - Windows не змогла дописати файл: дані на цьому томі могли пошкодитися. Перевірте файли і зробіть копію.'
+                  Run = "Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'disk', 'Ntfs'; Id = 7, 154, 51, 50, 140; StartTime = (Get-Date).AddDays(-30) } -ErrorAction SilentlyContinue | Select-Object -First 30 | ForEach-Object { '{0:yyyy-MM-dd HH:mm} {1} {2}: {3}' -f `$_.TimeCreated, `$_.ProviderName, `$_.Id, ((`$_.Properties | ForEach-Object { `$_.Value } | Where-Object { `$_ -is [string] -and `$_ }) -join ' | ') }" }
+               @{ Text = 'SMART і лічильники надійності.'; Admin = $true
+                  Hint = 'Reallocated/Pending/Uncorrectable > 0 - диск деградує. UDMA CRC > 0 - кабель SATA. LoadUnload (паркування головок) ~300 000 - розрахунковий ресурс настільних HDD (Windows показує його 16-бітним, тож велике число може "переповнитися"; точне значення - у DEADPIXEL → Диски).'
+                  Run = 'Get-PhysicalDisk | ForEach-Object { $c = $_ | Get-StorageReliabilityCounter; [pscustomobject]@{ Disk = $_.DeviceId; Model = $_.FriendlyName; Media = $_.MediaType; Health = $_.HealthStatus; TempC = $c.Temperature; Hours = $c.PowerOnHours; StartStop = $c.StartStopCycleCount; LoadUnload = $c.LoadUnloadCycleCount; ReadErrUncorr = $c.ReadErrorsUncorrected; WearPct = $c.Wear } } | Format-Table -AutoSize' }
+               @{ Text = 'Як підключені диски: модель, шина (SATA/NVMe/USB) і літери.'
+                  Run = 'Get-PhysicalDisk | Sort-Object DeviceId | Format-Table DeviceId, FriendlyName, BusType, MediaType, HealthStatus -AutoSize; Get-Partition | Where-Object DriveLetter | Format-Table DiskNumber, DriveLetter, @{ n = "GB"; e = { [math]::Round($_.Size / 1GB) } } -AutoSize' }
+           ) }
+        @{ Id = 'fs-scan'; Title = 'Перевірка файлової системи'
+           Description = 'chkdsk /scan - онлайн-перевірка тому без відключення диска і без виправлень. Якщо знайде проблеми, підкаже, що робити далі.'
+           Params = @(
+               @{ Name = 'DRIVE'; Title = 'Літера диска'; Default = 'D:'; Pattern = '[A-Za-z]:'; Hint = 'Наприклад, F: або S:. Для зовнішнього диска після помилок запису - обов''язково.' }
+           )
+           Steps = @(
+               @{ Text = 'Онлайн-перевірка {DRIVE} (лише читання).'; Admin = $true
+                  Run = 'chkdsk {DRIVE} /scan'; Expect = '(?i)no problems|не виявлено|found no problems' }
+               @{ Text = 'Знайдено проблеми - виправте їх (диск буде тимчасово недоступний; для C: - під час перезавантаження).'; If = 'fail'; Admin = $true
+                  Confirm = 'Закрийте програми, що використовують цей диск. Продовжити виправлення?'
+                  Run = 'chkdsk {DRIVE} /spotfix' }
+           ) }
+        @{ Id = 'usb-disk'; Title = 'Зовнішній USB-диск зависає'
+           Description = 'USB-кишеня/док: зависання по кілька хвилин, помилки читання, "Delayed Write Failed".'
+           Steps = @(
+               'Не записуйте на нього важливе без копії, доки причину не знайдено.'
+               'Підключіть до USB-порту на задній панелі (прямо в материнську плату), без хабів і подовжувачів. Спробуйте інший кабель.'
+               @{ Text = 'Застосуйте пункт "USB selective suspend" на вкладці Рекомендовані.' }
+               @{ Text = 'Перевірте SMART через CrystalDiskInfo (вона бачить диски в більшості USB-кишень).'; Open = 'https://crystalmark.info/en/software/crystaldiskinfo/' }
+               'Якщо кишеня розбирається - підключіть диск напряму по SATA: так видно, винен диск чи контролер кишені.'
+           ) }
+    )
 }
