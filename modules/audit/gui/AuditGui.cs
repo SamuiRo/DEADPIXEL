@@ -19,6 +19,7 @@ namespace DeadPixel
         [STAThread]
         static void Main(string[] args)
         {
+            ModuleHost.InitLanguage();
             // --background — сканування за розкладом (Планувальник): без вікна, результат забере трей із summary.ini
             if (args.Contains("--background"))
             {
@@ -68,7 +69,7 @@ namespace DeadPixel
     {
         public string Error { get; set; } public string Time { get; set; } public bool IsAdmin { get; set; }
         public int Score { get; set; } public string Grade { get; set; }
-        public int ScheduleDays { get; set; } public int NewCount { get; set; }
+        public int ScheduleDays { get; set; } public int NewCount { get; set; } public string Lang { get; set; }
         public List<AreaInfo> Areas { get; set; } public List<CheckResult> Results { get; set; }
     }
 
@@ -93,7 +94,7 @@ namespace DeadPixel
         public AuditForm(string check)
         {
             focusId = check;
-            Text = "DEADPIXEL — Аудит системи" + (ModuleHost.IsAdmin ? " (адміністратор)" : "");
+            Text = L.T("DEADPIXEL — Аудит системи", "DEADPIXEL — System audit") + (ModuleHost.IsAdmin ? L.T(" (адміністратор)", " (administrator)") : "");
             Font = new Font("Segoe UI", 9f);
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -103,12 +104,12 @@ namespace DeadPixel
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
             // ---- шапка: оцінка і кнопки
-            btnScan = Ui.Btn("Сканувати", (s, e) => Scan(false));
-            btnScanAdmin = Ui.Btn("Сканувати з правами", (s, e) => Scan(true));
-            btnSchedule = Ui.Btn("Розклад…", (s, e) => EditSchedule());
-            btnHtml = Ui.Btn("Звіт HTML", (s, e) => ExportHtml());
-            btnQuarantine = Ui.Btn("Карантин…", (s, e) => ShowQuarantine());
-            btnSetup = Ui.Btn("Сетап ПК…", (s, e) => OpenSetup(null));
+            btnScan = Ui.Btn(L.T("Сканувати", "Scan"), (s, e) => Scan(false));
+            btnScanAdmin = Ui.Btn(L.T("Сканувати з правами", "Scan as administrator"), (s, e) => Scan(true));
+            btnSchedule = Ui.Btn(L.T("Розклад…", "Schedule…"), (s, e) => EditSchedule());
+            btnHtml = Ui.Btn(L.T("Звіт HTML", "HTML report"), (s, e) => ExportHtml());
+            btnQuarantine = Ui.Btn(L.T("Карантин…", "Quarantine…"), (s, e) => ShowQuarantine());
+            btnSetup = Ui.Btn(L.T("Сетап ПК…", "PC setup…"), (s, e) => OpenSetup(null));
             var scoreBox = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Dock = DockStyle.Left };
             var gradeBox = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
             gradeBox.Controls.Add(grade);
@@ -122,14 +123,14 @@ namespace DeadPixel
             header.Controls.Add(actions);
 
             // ---- список і подробиці
-            list = Ui.List(() => theme, 1, "Стан", 120, "Перевірка", 300, "Зараз", 210);
+            list = Ui.List(() => theme, 1, L.T("Стан", "Status"), 120, L.T("Перевірка", "Check"), 300, L.T("Зараз", "Current"), 210);
             list.ShowGroups = true;
             list.SelectedIndexChanged += (s, e) => ShowDetails();
-            btnFix = Ui.Btn("Виправити…", (s, e) => { var r = Selected; if (r != null) OpenSetup(r.Fix.Recipe); });
-            btnOpen = Ui.Btn("Відкрити в Windows", (s, e) => { var r = Selected; if (r != null) TryOpen(r.Fix.Open); });
-            btnDefender = Ui.Btn("Перевірити Defender'ом", (s, e) => { var r = Selected; if (r != null) ScanFiles(r.Files); });
-            btnCleanup = Ui.Btn("Прибрати…", (s, e) => { var r = Selected; if (r != null) CleanUp(r); });
-            btnIgnore = Ui.Btn("Ігнорувати", (s, e) => ToggleIgnore());
+            btnFix = Ui.Btn(L.T("Виправити…", "Fix…"), (s, e) => { var r = Selected; if (r != null) OpenSetup(r.Fix.Recipe); });
+            btnOpen = Ui.Btn(L.T("Відкрити в Windows", "Open in Windows"), (s, e) => { var r = Selected; if (r != null) TryOpen(r.Fix.Open); });
+            btnDefender = Ui.Btn(L.T("Перевірити Defender'ом", "Scan with Defender"), (s, e) => { var r = Selected; if (r != null) ScanFiles(r.Files); });
+            btnCleanup = Ui.Btn(L.T("Прибрати…", "Clean up…"), (s, e) => { var r = Selected; if (r != null) CleanUp(r); });
+            btnIgnore = Ui.Btn(L.T("Ігнорувати", "Ignore"), (s, e) => ToggleIgnore());
             var detailBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(0, 6, 0, 0), WrapContents = false };
             detailBar.Controls.AddRange(new Control[] { btnFix, btnCleanup, btnOpen, btnDefender, btnIgnore });
             var right = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6, 0, 0, 0) };
@@ -160,8 +161,9 @@ namespace DeadPixel
                 ShowReport(LoadLatest());
                 // Останній звіт видно одразу; якщо він старший за годину або його немає — оновлюємо (сканування ~3 с)
                 DateTime t;
-                if (report == null || !DateTime.TryParse(report.Time, out t) || DateTime.Now - t > TimeSpan.FromHours(1)) Scan(false);
-                else SetStatus("Показано звіт від " + t.ToString("dd.MM.yyyy HH:mm") + ".", theme.Muted);
+                // Звіт іншою мовою (мову інтерфейсу змінили) теж оновлюємо: тексти пояснень формує скрипт
+                if (report == null || !DateTime.TryParse(report.Time, out t) || DateTime.Now - t > TimeSpan.FromHours(1) || (report.Lang ?? "uk") != L.Code) Scan(false);
+                else SetStatus(L.T("Показано звіт від ", "Showing the report from ") + t.ToString("dd.MM.yyyy HH:mm") + ".", theme.Muted);
             };
         }
 
@@ -203,14 +205,15 @@ namespace DeadPixel
 
         void Scan(bool elevate)
         {
-            RunAsync(elevate ? "Сканую з правами адміністратора…" : "Сканую систему…", () => ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Save", elevate), res =>
+            RunAsync(elevate ? L.T("Сканую з правами адміністратора…", "Scanning as administrator…") : L.T("Сканую систему…", "Scanning the system…"), () => ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Save", elevate), res =>
             {
                 var r = Normalize((AuditReport)res);
                 if (r.Error != null) { SetStatus(r.Error, theme.Danger); return; }
                 ShowReport(r);
                 int n = r.Results.Count(x => x.IsIssue && !x.Ignored);
-                SetStatus(n == 0 ? "Проблем не знайдено." :
-                    "Знайдено проблем: " + n + (r.NewCount > 0 ? ", нових з минулого сканування: " + r.NewCount : "") + ". Виберіть рядок, щоб побачити пояснення і що зробити.",
+                SetStatus(n == 0 ? L.T("Проблем не знайдено.", "No problems found.") :
+                    L.T("Знайдено проблем: ", "Problems found: ") + n + (r.NewCount > 0 ? L.T(", нових з минулого сканування: ", ", new since the last scan: ") + r.NewCount : "") +
+                    L.T(". Виберіть рядок, щоб побачити пояснення і що зробити.", ". Select a row to see the explanation and what to do."),
                     n == 0 ? ModuleHost.Ok(theme) : theme.Warn);
             });
         }
@@ -221,12 +224,12 @@ namespace DeadPixel
             if (r == null) return;
             focusId = r.Id;
             var args = (r.Ignored ? "-Unignore " : "-Ignore ") + "\"" + r.Id + "\"";
-            RunAsync("Оновлюю список ігнорованого…", () => ModuleHost.RunScript<AuditReport>("Audit.ps1", args, false), res =>
+            RunAsync(L.T("Оновлюю список ігнорованого…", "Updating the ignore list…"), () => ModuleHost.RunScript<AuditReport>("Audit.ps1", args, false), res =>
             {
                 var rep = Normalize((AuditReport)res);
                 if (rep.Error != null) { SetStatus(rep.Error, theme.Danger); return; }
                 ShowReport(rep);
-                SetStatus(r.Ignored ? "Знахідка знову враховується." : "«" + r.Title + "» більше не враховується в оцінці (видно сірим унизу).", theme.Muted);
+                SetStatus(r.Ignored ? L.T("Знахідка знову враховується.", "The finding counts again.") : string.Format(L.T("«{0}» більше не враховується в оцінці (видно сірим унизу).", "\"{0}\" no longer counts toward the score (shown greyed out at the bottom)."), r.Title), theme.Muted);
             });
         }
 
@@ -238,7 +241,7 @@ namespace DeadPixel
             if (r == null)
             {
                 score.Text = "—"; score.ForeColor = theme.Muted;
-                grade.Text = "Ще не сканувалося"; grade.ForeColor = theme.Fg;
+                grade.Text = L.T("Ще не сканувалося", "Not scanned yet"); grade.ForeColor = theme.Fg;
                 when.Text = "";
                 list.Items.Clear();
                 BuildAreaBar();
@@ -251,9 +254,9 @@ namespace DeadPixel
             score.ForeColor = grade.ForeColor = ScoreColor(r.Score);
             grade.Text = r.Grade;
             DateTime t;
-            when.Text = (DateTime.TryParse(r.Time, out t) ? "Сканування " + t.ToString("dd.MM.yyyy HH:mm") : "") +
-                        (r.IsAdmin ? " · з правами адміністратора" : "") +
-                        (r.ScheduleDays > 0 ? " · автоматично раз на " + r.ScheduleDays + " дн." : " · розклад вимкнено");
+            when.Text = (DateTime.TryParse(r.Time, out t) ? L.T("Сканування ", "Scanned ") + t.ToString("dd.MM.yyyy HH:mm") : "") +
+                        (r.IsAdmin ? L.T(" · з правами адміністратора", " · as administrator") : "") +
+                        (r.ScheduleDays > 0 ? string.Format(L.T(" · автоматично раз на {0} дн.", " · automatically every {0} days"), r.ScheduleDays) : L.T(" · розклад вимкнено", " · schedule off"));
             if (area != null && !r.Areas.Any(a => a.Id == area)) area = null;
             BuildAreaBar();
             FillList();
@@ -268,7 +271,7 @@ namespace DeadPixel
             var colored = new List<KeyValuePair<Button, int>>();
             if (report != null)
             {
-                colored.Add(AreaButton(null, "Усі області", report.Results.Count(x => x.IsIssue && !x.Ignored)));
+                colored.Add(AreaButton(null, L.T("Усі області", "All areas"), report.Results.Count(x => x.IsIssue && !x.Ignored)));
                 foreach (var a in report.Areas) colored.Add(AreaButton(a.Id, a.Title + "  ·  " + a.Score, a.Issues));
             }
             foreach (var kv in colored) areaBar.Controls.Add(kv.Key);
@@ -279,7 +282,7 @@ namespace DeadPixel
 
         KeyValuePair<Button, int> AreaButton(string id, string title, int issues)
         {
-            var text = title + "\n" + (issues == 0 ? "проблем немає" : issues + " " + Plural(issues, "проблема", "проблеми", "проблем"));
+            var text = title + "\n" + (issues == 0 ? L.T("проблем немає", "no problems") : issues + " " + (L.En ? (issues == 1 ? "problem" : "problems") : Plural(issues, "проблема", "проблеми", "проблем")));
             var b = new Button { Text = text, AutoSize = true, MinimumSize = new Size(150, 50), Padding = new Padding(10, 2, 10, 2), Margin = new Padding(0, 0, 6, 4), TextAlign = ContentAlignment.MiddleLeft, Tag = id == area ? "tab-selected" : "tab" };
             b.Click += (s, e) => { if (busy) return; area = id; BuildAreaBar(); FillList(); };
             return new KeyValuePair<Button, int>(b, issues);
@@ -317,7 +320,7 @@ namespace DeadPixel
                 }
                 foreach (var r in report.Results.Where(x => groups.ContainsKey(x.Area)).OrderBy(Rank))
                 {
-                    var title = r.New && !r.Ignored ? r.Title + "   · нове" : r.Title;
+                    var title = r.New && !r.Ignored ? r.Title + L.T("   · нове", "   · new") : r.Title;
                     var lvi = new ListViewItem(new[] { StatusText(r), title, r.Value }, groups[r.Area]) { Tag = r, UseItemStyleForSubItems = false, ToolTipText = r.Detail };
                     lvi.SubItems[0].ForeColor = StatusColor(r);
                     lvi.SubItems[0].Font = new Font(list.Font, FontStyle.Bold);
@@ -343,36 +346,36 @@ namespace DeadPixel
             btnDefender.Visible = r != null && r.Files.Count > 0;
             btnCleanup.Visible = r != null && r.Cleanup.Count > 0 && !r.Ignored;
             btnIgnore.Visible = r != null && (r.IsIssue || r.Status == "info" || r.Ignored);
-            if (r != null) btnIgnore.Text = r.Ignored ? "Не ігнорувати" : "Ігнорувати";
+            if (r != null) btnIgnore.Text = r.Ignored ? L.T("Не ігнорувати", "Stop ignoring") : L.T("Ігнорувати", "Ignore");
             btnFix.Enabled = btnOpen.Enabled = btnDefender.Enabled = btnCleanup.Enabled = btnIgnore.Enabled = !busy;
             if (r == null)
             {
-                Add(report == null ? "Натисніть «Сканувати», щоб перевірити систему." : "Виберіть перевірку зліва.", theme.Muted, false, 10f);
+                Add(report == null ? L.T("Натисніть «Сканувати», щоб перевірити систему.", "Click \"Scan\" to check the system.") : L.T("Виберіть перевірку зліва.", "Select a check on the left."), theme.Muted, false, 10f);
                 return;
             }
 
             Add(r.Title + "\n", theme.Fg, true, 13f);
             Add(StatusLong(r) + (string.IsNullOrEmpty(r.Value) ? "" : "  ·  " + r.Value) + "\n", StatusColor(r), true, 10f);
             if (!string.IsNullOrEmpty(r.Detail)) Add(r.Detail + "\n", theme.Fg, false, 10f);
-            if (r.New && !r.Ignored) Add("Нове з минулого сканування.\n", theme.Accent, true, 9.5f);
-            if (r.Ignored) Add("Ви позначили це як свідомий вибір — знахідка не враховується в оцінці.\n", theme.Muted, false, 9.5f);
-            if (r.NeedsAdmin) Add("Щоб перевірити точно, натисніть «Сканувати з правами».\n", theme.Warn, false, 9.5f);
+            if (r.New && !r.Ignored) Add(L.T("Нове з минулого сканування.\n", "New since the last scan.\n"), theme.Accent, true, 9.5f);
+            if (r.Ignored) Add(L.T("Ви позначили це як свідомий вибір — знахідка не враховується в оцінці.\n", "You marked this as a deliberate choice — it does not count toward the score.\n"), theme.Muted, false, 9.5f);
+            if (r.NeedsAdmin) Add(L.T("Щоб перевірити точно, натисніть «Сканувати з правами».\n", "For an exact check, click \"Scan as administrator\".\n"), theme.Warn, false, 9.5f);
 
-            if (!string.IsNullOrEmpty(r.Explain)) { Heading("Що це"); Add(r.Explain + "\n", theme.Fg, false, 10f); }
-            if (r.Pros.Count > 0) { Heading("Плюси"); Bullets(r.Pros, ModuleHost.Ok(theme), "+  "); }
-            if (r.Cons.Count > 0) { Heading("Мінуси і на що зважити"); Bullets(r.Cons, theme.Warn, "−  "); }
-            if (r.Evidence.Count > 0) { Heading("Докази"); Bullets(r.Evidence, theme.Muted, "·  "); }
+            if (!string.IsNullOrEmpty(r.Explain)) { Heading(L.T("Що це", "What it is")); Add(r.Explain + "\n", theme.Fg, false, 10f); }
+            if (r.Pros.Count > 0) { Heading(L.T("Плюси", "Pros")); Bullets(r.Pros, ModuleHost.Ok(theme), "+  "); }
+            if (r.Cons.Count > 0) { Heading(L.T("Мінуси і на що зважити", "Cons and things to consider")); Bullets(r.Cons, theme.Warn, "−  "); }
+            if (r.Evidence.Count > 0) { Heading(L.T("Докази", "Evidence")); Bullets(r.Evidence, theme.Muted, "·  "); }
 
             var fixLines = new List<string>(r.Fix.Steps);
             if (!string.IsNullOrEmpty(r.Fix.Recipe))
-                fixLines.Insert(0, "«Виправити…» відкриє рецепт у Сетапі ПК: там видно, що саме зміниться, а поточні значення зберігаються для відкату.");
+                fixLines.Insert(0, L.T("«Виправити…» відкриє рецепт у Сетапі ПК: там видно, що саме зміниться, а поточні значення зберігаються для відкату.", "\"Fix…\" opens the recipe in PC setup: it shows exactly what will change, and current values are saved so you can revert."));
             if (!string.IsNullOrEmpty(r.Fix.Open))
-                fixLines.Add("«Відкрити в Windows» — відповідне вікно налаштувань.");
+                fixLines.Add(L.T("«Відкрити в Windows» — відповідне вікно налаштувань.", "\"Open in Windows\" — the matching settings window."));
             if (r.Files.Count > 0)
-                fixLines.Insert(0, "«Перевірити Defender'ом» — перевірка підозрілих файлів (" + r.Files.Count + "); нічого не видаляє, лише повідомляє результат.");
+                fixLines.Insert(0, string.Format(L.T("«Перевірити Defender'ом» — перевірка підозрілих файлів ({0}); нічого не видаляє, лише повідомляє результат.", "\"Scan with Defender\" — checks the suspicious files ({0}); removes nothing, only reports the result."), r.Files.Count));
             if (r.Cleanup.Count > 0)
-                fixLines.Insert(0, "«Прибрати…» — виберіть, що перенести в карантин: файли переносяться, записи зберігаються, тож усе можна відновити («Карантин…»). Остаточно видалити можна через 30 днів.");
-            if ((r.IsIssue || r.Status == "info") && fixLines.Count > 0) { Heading("Як виправити"); Bullets(fixLines, theme.Fg, "→  "); }
+                fixLines.Insert(0, L.T("«Прибрати…» — виберіть, що перенести в карантин: файли переносяться, записи зберігаються, тож усе можна відновити («Карантин…»). Остаточно видалити можна через 30 днів.", "\"Clean up…\" — choose what to move to quarantine: files are moved and records saved, so everything can be restored (\"Quarantine…\"). Permanent deletion is possible after 30 days."));
+            if ((r.IsIssue || r.Status == "info") && fixLines.Count > 0) { Heading(L.T("Як виправити", "How to fix")); Bullets(fixLines, theme.Fg, "→  "); }
             details.SelectionStart = 0;
             details.ScrollToCaret();
         }
@@ -418,35 +421,35 @@ namespace DeadPixel
 
         static string StatusText(CheckResult r)
         {
-            if (r.Ignored) return "◌ Ігнор.";
+            if (r.Ignored) return L.T("◌ Ігнор.", "◌ Ignored");
             switch (r.Status)
             {
-                case "ok": return "✓ Гаразд";
-                case "info": return "ℹ Інфо";
-                case "unknown": return "? Невідомо";
-                case "na": return "— Н/д";
+                case "ok": return L.T("✓ Гаразд", "✓ OK");
+                case "info": return L.T("ℹ Інфо", "ℹ Info");
+                case "unknown": return L.T("? Невідомо", "? Unknown");
+                case "na": return L.T("— Н/д", "— N/A");
             }
             switch (r.Severity)
             {
-                case "critical": return "✕ Критично";
-                case "high": return "✕ Високий";
-                case "medium": return "● Середній";
-                default: return "● Низький";
+                case "critical": return L.T("✕ Критично", "✕ Critical");
+                case "high": return L.T("✕ Високий", "✕ High");
+                case "medium": return L.T("● Середній", "● Medium");
+                default: return L.T("● Низький", "● Low");
             }
         }
 
         static string StatusLong(CheckResult r)
         {
-            if (r.Status == "ok") return "Усе гаразд";
-            if (r.Status == "info") return "Для інформації";
-            if (r.Status == "unknown") return "Не вдалося перевірити";
-            if (r.Status == "na") return "Не стосується цього ПК";
+            if (r.Status == "ok") return L.T("Усе гаразд", "All good");
+            if (r.Status == "info") return L.T("Для інформації", "For information");
+            if (r.Status == "unknown") return L.T("Не вдалося перевірити", "Could not check");
+            if (r.Status == "na") return L.T("Не стосується цього ПК", "Not applicable to this PC");
             switch (r.Severity)
             {
-                case "critical": return "Критичний ризик";
-                case "high": return "Високий ризик";
-                case "medium": return "Середній ризик";
-                default: return "Низький ризик";
+                case "critical": return L.T("Критичний ризик", "Critical risk");
+                case "high": return L.T("Високий ризик", "High risk");
+                case "medium": return L.T("Середній ризик", "Medium risk");
+                default: return L.T("Низький ризик", "Low risk");
             }
         }
 
@@ -478,7 +481,7 @@ namespace DeadPixel
         void OpenSetup(string recipe)
         {
             var exe = Path.GetFullPath(Path.Combine(ModuleHost.Dir, @"..\setup\SetupGui.exe"));
-            if (!File.Exists(exe)) { SetStatus("Не знайдено " + exe, theme.Danger); return; }
+            if (!File.Exists(exe)) { SetStatus(L.T("Не знайдено ", "Not found: ") + exe, theme.Danger); return; }
             try { Process.Start(new ProcessStartInfo(exe, recipe == null ? "" : "--open \"" + recipe + "\"") { UseShellExecute = true }); }
             catch (Exception ex) { SetStatus(ex.Message, theme.Danger); }
         }
@@ -488,15 +491,15 @@ namespace DeadPixel
         void ScanFiles(List<string> files)
         {
             var mp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Windows Defender\MpCmdRun.exe");
-            if (!File.Exists(mp)) { SetStatus("Microsoft Defender не знайдено (працює інший антивірус?) — перевірте файли ним.", theme.Warn); return; }
+            if (!File.Exists(mp)) { SetStatus(L.T("Microsoft Defender не знайдено (працює інший антивірус?) — перевірте файли ним.", "Microsoft Defender not found (is another antivirus active?) — scan the files with it."), theme.Warn); return; }
             var list = files.Take(20).ToList();
-            RunAsync("Defender перевіряє файлів: " + list.Count + "…", () =>
+            RunAsync(string.Format(L.T("Defender перевіряє файлів: {0}…", "Defender is scanning {0} file(s)…"), list.Count), () =>
             {
                 var lines = new List<string>();
                 int threats = 0, errors = 0;
                 foreach (var f in list)
                 {
-                    if (!File.Exists(f)) { lines.Add("—  " + f + " (файлу вже немає)"); continue; }
+                    if (!File.Exists(f)) { lines.Add("—  " + f + L.T(" (файлу вже немає)", " (the file is gone)")); continue; }
                     var psi = new ProcessStartInfo(mp, "-Scan -ScanType 3 -File \"" + f + "\" -DisableRemediation")
                     { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8 };
                     using (var p = Process.Start(psi))
@@ -504,8 +507,8 @@ namespace DeadPixel
                         var output = p.StandardOutput.ReadToEnd();
                         p.WaitForExit();
                         if (p.ExitCode == 0) lines.Add("✓  " + f);
-                        else if (p.ExitCode == 2) { threats++; lines.Add("✕  " + f + "  — ЗАГРОЗА: " + string.Join("; ", output.Split('\n').Where(l => l.IndexOf("Threat", StringComparison.OrdinalIgnoreCase) >= 0).Select(l => l.Trim()))); }
-                        else { errors++; lines.Add("?  " + f + "  — не вдалося перевірити (код " + p.ExitCode + ")"); }
+                        else if (p.ExitCode == 2) { threats++; lines.Add("✕  " + f + L.T("  — ЗАГРОЗА: ", "  — THREAT: ") + string.Join("; ", output.Split('\n').Where(l => l.IndexOf("Threat", StringComparison.OrdinalIgnoreCase) >= 0).Select(l => l.Trim()))); }
+                        else { errors++; lines.Add("?  " + f + string.Format(L.T("  — не вдалося перевірити (код {0})", "  — could not scan (code {0})"), p.ExitCode)); }
                     }
                 }
                 return new object[] { threats, errors, lines };
@@ -514,11 +517,11 @@ namespace DeadPixel
                 var a = (object[])res;
                 int threats = (int)a[0], errors = (int)a[1];
                 var lines = (List<string>)a[2];
-                if (threats > 0) SetStatus("Defender знайшов загроз: " + threats + ". Відкрийте «Безпека Windows», щоб видалити їх.", theme.Danger);
-                else if (errors > 0) SetStatus("Загроз не знайдено, але " + errors + " файл(и) перевірити не вдалося.", theme.Warn);
-                else SetStatus("Defender: загроз не знайдено (" + list.Count + " файл.). Підозра лишається, якщо ви не впізнаєте програму.", ModuleHost.Ok(theme));
-                MessageBox.Show(this, string.Join("\n", lines) + (threats > 0 ? "\n\nЗагрозу не видалено: зробіть це в «Безпека Windows» → «Захист від вірусів і загроз»." : ""),
-                    "DEADPIXEL — перевірка Defender'ом", MessageBoxButtons.OK, threats > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+                if (threats > 0) SetStatus(string.Format(L.T("Defender знайшов загроз: {0}. Відкрийте «Безпека Windows», щоб видалити їх.", "Defender found {0} threat(s). Open Windows Security to remove them."), threats), theme.Danger);
+                else if (errors > 0) SetStatus(string.Format(L.T("Загроз не знайдено, але {0} файл(и) перевірити не вдалося.", "No threats found, but {0} file(s) could not be scanned."), errors), theme.Warn);
+                else SetStatus(string.Format(L.T("Defender: загроз не знайдено ({0} файл.). Підозра лишається, якщо ви не впізнаєте програму.", "Defender: no threats found ({0} file(s)). Stay suspicious if you do not recognize the program."), list.Count), ModuleHost.Ok(theme));
+                MessageBox.Show(this, string.Join("\n", lines) + (threats > 0 ? L.T("\n\nЗагрозу не видалено: зробіть це в «Безпека Windows» → «Захист від вірусів і загроз».", "\n\nThe threat was not removed: do it in Windows Security → Virus & threat protection.") : ""),
+                    L.T("DEADPIXEL — перевірка Defender'ом", "DEADPIXEL — Defender scan"), MessageBoxButtons.OK, threats > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
             });
         }
 
@@ -528,7 +531,7 @@ namespace DeadPixel
 
         static string SizeText(long b)
         {
-            return b >= 1L << 30 ? (b / (double)(1L << 30)).ToString("0.0") + " ГБ" : b >= 1L << 20 ? (b >> 20) + " МБ" : b > 0 ? Math.Max(1, b >> 10) + " КБ" : "";
+            return b >= 1L << 30 ? (b / (double)(1L << 30)).ToString("0.0") + L.T(" ГБ", " GB") : b >= 1L << 20 ? (b >> 20) + L.T(" МБ", " MB") : b > 0 ? Math.Max(1, b >> 10) + L.T(" КБ", " KB") : "";
         }
 
         Form NewDialog(string title, int w, int h)
@@ -543,11 +546,13 @@ namespace DeadPixel
         // Список того, що можна прибрати: позначено те, що точно зламане; «можливі залишки» — ні
         void CleanUp(CheckResult r)
         {
-            using (var dlg = NewDialog("Прибрати: " + r.Title, 760, 520))
+            using (var dlg = NewDialog(L.T("Прибрати: ", "Clean up: ") + r.Title, 760, 520))
             {
                 var info = new Label { Dock = DockStyle.Top, Height = 64, Padding = new Padding(12, 10, 12, 0), Tag = "muted",
-                    Text = "Позначене буде перенесено в карантин: файли й папки — у data\\quarantine, записи реєстру, завдання й правила брандмауера — зберігаються для відновлення. " +
-                           "Повернути все можна кнопкою «Карантин…». Потрібні права адміністратора (UAC)." };
+                    Text = L.T("Позначене буде перенесено в карантин: файли й папки — у data\\quarantine, записи реєстру, завдання й правила брандмауера — зберігаються для відновлення. " +
+                               "Повернути все можна кнопкою «Карантин…». Потрібні права адміністратора (UAC).",
+                               "Checked items go to quarantine: files and folders move to data\\quarantine; registry entries, tasks and firewall rules are saved for restoring. " +
+                               "Everything can be put back with \"Quarantine…\". Administrator rights (UAC) are required.") };
                 var list = new CheckedListBox { Dock = DockStyle.Fill, CheckOnClick = true, BorderStyle = BorderStyle.None, IntegralHeight = false, HorizontalScrollbar = true };
                 foreach (var it in r.Cleanup) list.Items.Add(it.Label, it.Default);
                 var total = new Label { AutoSize = true, Padding = new Padding(4, 8, 0, 0), Tag = "muted" };
@@ -555,13 +560,13 @@ namespace DeadPixel
                 {
                     long size = 0; int n = 0;
                     for (int i = 0; i < list.Items.Count; i++) if (list.GetItemChecked(i)) { n++; size += r.Cleanup[i].Size; }
-                    total.Text = "Вибрано: " + n + (size > 0 ? ", " + SizeText(size) : "");
+                    total.Text = L.T("Вибрано: ", "Selected: ") + n + (size > 0 ? ", " + SizeText(size) : "");
                 };
                 list.ItemCheck += (s, e) => BeginInvoke(recount);   // ItemCheck приходить до зміни позначки
-                var all = Ui.Btn("Усі", (s, e) => { for (int i = 0; i < list.Items.Count; i++) list.SetItemChecked(i, true); recount(); });
-                var none = Ui.Btn("Жодного", (s, e) => { for (int i = 0; i < list.Items.Count; i++) list.SetItemChecked(i, false); recount(); });
-                var go = new Button { Text = "Перенести в карантин", DialogResult = DialogResult.OK, AutoSize = true, Height = 30, Padding = new Padding(10, 2, 10, 2) };
-                var cancel = new Button { Text = "Скасувати", DialogResult = DialogResult.Cancel, AutoSize = true, Height = 30, Padding = new Padding(10, 2, 10, 2), Margin = new Padding(8, 0, 0, 0) };
+                var all = Ui.Btn(L.T("Усі", "All"), (s, e) => { for (int i = 0; i < list.Items.Count; i++) list.SetItemChecked(i, true); recount(); });
+                var none = Ui.Btn(L.T("Жодного", "None"), (s, e) => { for (int i = 0; i < list.Items.Count; i++) list.SetItemChecked(i, false); recount(); });
+                var go = new Button { Text = L.T("Перенести в карантин", "Move to quarantine"), DialogResult = DialogResult.OK, AutoSize = true, Height = 30, Padding = new Padding(10, 2, 10, 2) };
+                var cancel = new Button { Text = L.T("Скасувати", "Cancel"), DialogResult = DialogResult.Cancel, AutoSize = true, Height = 30, Padding = new Padding(10, 2, 10, 2), Margin = new Padding(8, 0, 0, 0) };
                 var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(12, 8, 12, 6), WrapContents = false };
                 bar.Controls.AddRange(new Control[] { all, none, total });
                 var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, Padding = new Padding(0, 8, 12, 6) };
@@ -583,7 +588,7 @@ namespace DeadPixel
                 if (chosen.Count == 0) return;
                 var tmp = Path.Combine(Path.GetTempPath(), "deadpixel-cleanup-" + Guid.NewGuid().ToString("N") + ".json");
                 File.WriteAllText(tmp, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(chosen), new UTF8Encoding(false));
-                RunAsync("Переношу в карантин: " + chosen.Count + "…", () =>
+                RunAsync(string.Format(L.T("Переношу в карантин: {0}…", "Moving to quarantine: {0}…"), chosen.Count), () =>
                 {
                     try { return ModuleHost.RunScript<CleanupResult>(SetupScript, "-Cleanup \"" + tmp + "\"", true); }
                     finally { try { File.Delete(tmp); } catch { } }
@@ -593,10 +598,10 @@ namespace DeadPixel
                     if (cr.Error != null) { SetStatus(cr.Error, theme.Danger); return; }
                     var items = cr.Items ?? new List<CleanupOutcome>();
                     int moved = items.Count(x => x.Status == "MOVED"), skipped = items.Count - moved;
-                    SetStatus("У карантині: " + moved + (skipped > 0 ? ", пропущено: " + skipped : "") + ". Повернути — «Карантин…».", skipped > 0 ? theme.Warn : ModuleHost.Ok(theme));
+                    SetStatus(L.T("У карантині: ", "Quarantined: ") + moved + (skipped > 0 ? L.T(", пропущено: ", ", skipped: ") + skipped : "") + L.T(". Повернути — «Карантин…».", ". To restore — \"Quarantine…\"."), skipped > 0 ? theme.Warn : ModuleHost.Ok(theme));
                     if (skipped > 0)
                         MessageBox.Show(this, string.Join("\n", items.Where(x => x.Status != "MOVED").Select(x => "— " + x.Label + ": " + x.Message)),
-                            "DEADPIXEL — пропущено", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            L.T("DEADPIXEL — пропущено", "DEADPIXEL — skipped"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     Scan(false);
                 });
             }
@@ -604,9 +609,9 @@ namespace DeadPixel
 
         void ShowQuarantine()
         {
-            using (var dlg = NewDialog("Карантин", 820, 460))
+            using (var dlg = NewDialog(L.T("Карантин", "Quarantine"), 820, 460))
             {
-                var list = Ui.List(() => theme, 1, "Дата", 130, "Що", 420, "Розмір", 90, "Стан", 140);
+                var list = Ui.List(() => theme, 1, L.T("Дата", "Date"), 130, L.T("Що", "What"), 420, L.T("Розмір", "Size"), 90, L.T("Стан", "State"), 140);
                 var info = new Label { Dock = DockStyle.Top, Height = 44, Padding = new Padding(12, 10, 12, 0), Tag = "muted" };
                 QuarantineList data = null;
                 Action load = () =>
@@ -617,13 +622,13 @@ namespace DeadPixel
                     finally { UseWaitCursor = dlg.UseWaitCursor = false; }
                     list.Items.Clear();
                     if (data.Error != null) { info.Text = data.Error; return; }
-                    info.Text = "Сесії прибирання. «Відновити» повертає все на місце. «Видалити назавжди» стає доступним через " + data.Days +
-                                " днів — час помітити, якщо щось перестало працювати. Папка: " + data.Root;
+                    info.Text = string.Format(L.T("Сесії прибирання. «Відновити» повертає все на місце. «Видалити назавжди» стає доступним через {0} днів — час помітити, якщо щось перестало працювати. Папка: {1}",
+                                                     "Cleanup sessions. \"Restore\" puts everything back. \"Delete permanently\" becomes available after {0} days — time to notice if something stopped working. Folder: {1}"), data.Days, data.Root);
                     foreach (var s in data.Sessions ?? new List<QuarantineSession>())
                     {
                         DateTime t; DateTime.TryParse(s.Time, out t);
-                        var what = s.Count + " шт.: " + string.Join("; ", (s.Labels ?? new List<string>()).Take(3)) + ((s.Labels ?? new List<string>()).Count > 3 ? "…" : "");
-                        var state = s.Restored ? "відновлено" : s.CanPurge ? "можна видалити" : "ще " + Math.Max(1, data.Days - s.AgeDays) + " дн.";
+                        var what = s.Count + L.T(" шт.: ", " items: ") + string.Join("; ", (s.Labels ?? new List<string>()).Take(3)) + ((s.Labels ?? new List<string>()).Count > 3 ? "…" : "");
+                        var state = s.Restored ? L.T("відновлено", "restored") : s.CanPurge ? L.T("можна видалити", "can be deleted") : string.Format(L.T("ще {0} дн.", "{0} more days"), Math.Max(1, data.Days - s.AgeDays));
                         list.Items.Add(new ListViewItem(new[] { t.ToString("dd.MM.yyyy HH:mm"), what, SizeText(s.Size), state }) { Tag = s, ToolTipText = string.Join("\n", s.Labels ?? new List<string>()) });
                     }
                 };
@@ -633,23 +638,23 @@ namespace DeadPixel
                     UseWaitCursor = dlg.UseWaitCursor = true;
                     CleanupResult res;
                     try { res = ModuleHost.RunScript<CleanupResult>(SetupScript, verb + " \"" + id + "\"", true); }
-                    catch (Win32Exception) { res = new CleanupResult { Error = "Скасовано: права адміністратора не надано." }; }
+                    catch (Win32Exception) { res = new CleanupResult { Error = L.T("Скасовано: права адміністратора не надано.", "Cancelled: administrator rights were not granted.") }; }
                     catch (Exception ex) { res = new CleanupResult { Error = ex.Message }; }
                     finally { UseWaitCursor = dlg.UseWaitCursor = false; }
                     var items = res.Items ?? new List<CleanupOutcome>();
-                    var msg = res.Error ?? (items.Count == 0 ? "Готово." : string.Join("\n", items.Select(x => (x.Status == "RESTORED" ? "✓ " : "✕ ") + x.Label + (string.IsNullOrEmpty(x.Message) ? "" : " — " + x.Message))));
-                    MessageBox.Show(dlg, msg, "DEADPIXEL — карантин", MessageBoxButtons.OK, res.Error != null || items.Any(x => x.Status == "FAIL") ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+                    var msg = res.Error ?? (items.Count == 0 ? L.T("Готово.", "Done.") : string.Join("\n", items.Select(x => (x.Status == "RESTORED" ? "✓ " : "✕ ") + x.Label + (string.IsNullOrEmpty(x.Message) ? "" : " — " + x.Message))));
+                    MessageBox.Show(dlg, msg, L.T("DEADPIXEL — карантин", "DEADPIXEL — quarantine"), MessageBoxButtons.OK, res.Error != null || items.Any(x => x.Status == "FAIL") ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
                     load();
                 };
-                var restore = Ui.Btn("Відновити", (s, e) => { var q = sel(); if (q != null && !q.Restored) act("-Restore", q.Id); });
-                var purge = Ui.Btn("Видалити назавжди", (s, e) =>
+                var restore = Ui.Btn(L.T("Відновити", "Restore"), (s, e) => { var q = sel(); if (q != null && !q.Restored) act("-Restore", q.Id); });
+                var purge = Ui.Btn(L.T("Видалити назавжди", "Delete permanently"), (s, e) =>
                 {
                     var q = sel();
                     if (q == null || !q.CanPurge) return;
-                    if (MessageBox.Show(dlg, "Остаточно видалити " + q.Count + " шт. (" + SizeText(q.Size) + ")? Відновити буде неможливо.", "DEADPIXEL",
+                    if (MessageBox.Show(dlg, string.Format(L.T("Остаточно видалити {0} шт. ({1})? Відновити буде неможливо.", "Permanently delete {0} item(s) ({1})? They cannot be restored."), q.Count, SizeText(q.Size)), "DEADPIXEL",
                                         MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK) act("-Purge", q.Id);
                 });
-                var folder = Ui.Btn("Відкрити папку", (s, e) => { if (data != null && data.Root != null) TryOpen(data.Root); });
+                var folder = Ui.Btn(L.T("Відкрити папку", "Open folder"), (s, e) => { if (data != null && data.Root != null) TryOpen(data.Root); });
                 list.SelectedIndexChanged += (s, e) => { var q = sel(); restore.Enabled = q != null && !q.Restored; purge.Enabled = q != null && q.CanPurge; };
                 restore.Enabled = purge.Enabled = false;
                 var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(12, 8, 12, 6), WrapContents = false };
@@ -668,20 +673,23 @@ namespace DeadPixel
         void EditSchedule()
         {
             int current = report != null ? report.ScheduleDays : 0;
-            using (var dlg = new Form { Text = "Розклад аудиту", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false,
+            using (var dlg = new Form { Text = L.T("Розклад аудиту", "Audit schedule"), FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false,
                                         StartPosition = FormStartPosition.CenterParent, Font = Font, AutoScaleMode = AutoScaleMode.Dpi, AutoScaleDimensions = new SizeF(96f, 96f),
                                         ClientSize = new Size(470, 230), ShowInTaskbar = false })
             {
-                var on = new CheckBox { Text = "Сканувати автоматично", Checked = current > 0, AutoSize = true, Location = new Point(18, 18) };
-                var lbl = new Label { Text = "раз на", AutoSize = true, Location = new Point(40, 54) };
+                var on = new CheckBox { Text = L.T("Сканувати автоматично", "Scan automatically"), Checked = current > 0, AutoSize = true, Location = new Point(18, 18) };
+                var lbl = new Label { Text = L.T("раз на", "every"), AutoSize = true, Location = new Point(40, 54) };
                 var days = new NumericUpDown { Minimum = 1, Maximum = 30, Value = current > 0 ? current : 3, Width = 60, Location = new Point(96, 50) };
-                var lbl2 = new Label { Text = "дн.", AutoSize = true, Location = new Point(162, 54) };
+                var lbl2 = new Label { Text = L.T("дн.", "days"), AutoSize = true, Location = new Point(162, 54) };
                 var info = new Label { Tag = "muted", Location = new Point(18, 90), Size = new Size(434, 84),
-                    Text = "Аудит запуститься у фоні з низьким пріоритетом (о 12:00, або щойно ПК увімкнуть, якщо час пропущено) і займе кілька секунд. " +
-                           "Трей повідомить лише про нові серйозні проблеми. За розкладом аудит працює без прав адміністратора — так безпечніше; " +
-                           "системні процеси й підписки WMI перевіряє «Сканувати з правами»." };
-                var ok = new Button { Text = "Зберегти", DialogResult = DialogResult.OK, AutoSize = true, Location = new Point(270, 186) };
-                var cancel = new Button { Text = "Скасувати", DialogResult = DialogResult.Cancel, AutoSize = true, Location = new Point(362, 186) };
+                    Text = L.T("Аудит запуститься у фоні з низьким пріоритетом (о 12:00, або щойно ПК увімкнуть, якщо час пропущено) і займе кілька секунд. " +
+                               "Трей повідомить лише про нові серйозні проблеми. За розкладом аудит працює без прав адміністратора — так безпечніше; " +
+                               "системні процеси й підписки WMI перевіряє «Сканувати з правами».",
+                               "The audit runs in the background at low priority (at 12:00, or as soon as the PC is on if that time was missed) and takes a few seconds. " +
+                               "The tray reports only new serious problems. Scheduled scans run without administrator rights — it is safer; " +
+                               "system processes and WMI subscriptions are covered by \"Scan as administrator\".") };
+                var ok = new Button { Text = L.T("Зберегти", "Save"), DialogResult = DialogResult.OK, AutoSize = true, Location = new Point(270, 186) };
+                var cancel = new Button { Text = L.T("Скасувати", "Cancel"), DialogResult = DialogResult.Cancel, AutoSize = true, Location = new Point(362, 186) };
                 on.CheckedChanged += (s, e) => days.Enabled = lbl.Enabled = lbl2.Enabled = on.Checked;
                 days.Enabled = lbl.Enabled = lbl2.Enabled = on.Checked;
                 dlg.Controls.AddRange(new Control[] { on, lbl, days, lbl2, info, ok, cancel });
@@ -692,7 +700,7 @@ namespace DeadPixel
                 if (n == current) return;
                 // Розклад працює без прав адміністратора, тож і зміна його UAC не потребує. Виняток — завдання, створене
                 // старою версією з найвищими правами: замінити його можна лише з правами (Audit.ps1 повідомляє NEEDS_ADMIN)
-                RunAsync("Зберігаю розклад…", () =>
+                RunAsync(L.T("Зберігаю розклад…", "Saving the schedule…"), () =>
                 {
                     var r0 = ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Schedule " + n, false);
                     return r0.Error != null && r0.Error.StartsWith("NEEDS_ADMIN") ? ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Schedule " + n, true) : r0;
@@ -701,7 +709,7 @@ namespace DeadPixel
                     var r = Normalize((AuditReport)res);
                     if (r.Error != null) { SetStatus(r.Error, theme.Danger); return; }
                     if (report != null) { report.ScheduleDays = r.ScheduleDays; ShowReport(report); }
-                    SetStatus(r.ScheduleDays > 0 ? "Аудит запускатиметься автоматично раз на " + r.ScheduleDays + " дн." : "Автоматичний аудит вимкнено.", theme.Muted);
+                    SetStatus(r.ScheduleDays > 0 ? string.Format(L.T("Аудит запускатиметься автоматично раз на {0} дн.", "The audit will run automatically every {0} days."), r.ScheduleDays) : L.T("Автоматичний аудит вимкнено.", "Automatic audit is off."), theme.Muted);
                 });
             }
         }
@@ -709,16 +717,16 @@ namespace DeadPixel
         // HTML-звіт — у reports\ поруч із програмою (там і звіти DeadPixel.ps1), інакше в %LOCALAPPDATA%\DeadPixel\reports
         void ExportHtml()
         {
-            if (report == null) { SetStatus("Спершу запустіть сканування.", theme.Warn); return; }
+            if (report == null) { SetStatus(L.T("Спершу запустіть сканування.", "Run a scan first."), theme.Warn); return; }
             var dir = Path.GetFullPath(Path.Combine(ModuleHost.Dir, @"..\..\reports"));
             try { Directory.CreateDirectory(dir); File.WriteAllText(Path.Combine(dir, ".write-test"), ""); File.Delete(Path.Combine(dir, ".write-test")); }
             catch { dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"DeadPixel\reports"); }
             var path = Path.Combine(dir, "audit-" + DateTime.Now.ToString("yyyyMMdd-HHmm") + ".html");
-            RunAsync("Створюю звіт…", () => ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Html \"" + path + "\"", false), res =>
+            RunAsync(L.T("Створюю звіт…", "Creating the report…"), () => ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Html \"" + path + "\"", false), res =>
             {
                 var r = (AuditReport)res;
                 if (r.Error != null) { SetStatus(r.Error, theme.Danger); return; }
-                SetStatus("Звіт: " + path, theme.Muted);
+                SetStatus(L.T("Звіт: ", "Report: ") + path, theme.Muted);
                 TryOpen(path);
             });
         }
@@ -726,7 +734,7 @@ namespace DeadPixel
         void TryOpen(string what)
         {
             try { ModuleHost.Open(what); }
-            catch (Exception ex) { SetStatus("Не вдалося відкрити: " + ex.Message, theme.Danger); }
+            catch (Exception ex) { SetStatus(L.T("Не вдалося відкрити: ", "Could not open: ") + ex.Message, theme.Danger); }
         }
 
         void RunAsync(string text, Func<object> work, Action<object> done)
@@ -746,8 +754,8 @@ namespace DeadPixel
                         busy = false;
                         UpdateBusy();
                         var w32 = err as Win32Exception;
-                        if (w32 != null && w32.NativeErrorCode == 1223) SetStatus("Скасовано: права адміністратора не надано.", theme.Warn);
-                        else if (err != null) SetStatus("Помилка: " + err.Message, theme.Danger);
+                        if (w32 != null && w32.NativeErrorCode == 1223) SetStatus(L.T("Скасовано: права адміністратора не надано.", "Cancelled: administrator rights were not granted."), theme.Warn);
+                        else if (err != null) SetStatus(L.T("Помилка: ", "Error: ") + err.Message, theme.Danger);
                         else done(res);
                     }));
                 }

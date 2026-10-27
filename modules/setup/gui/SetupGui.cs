@@ -26,6 +26,7 @@ namespace DeadPixel
         [STAThread]
         static void Main(string[] args)
         {
+            ModuleHost.InitLanguage();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             // --open <рецепт>/<вкладка> — після перезапуску з правами адміністратора; --resume — після перезавантаження ПК
@@ -197,7 +198,7 @@ namespace DeadPixel
         public bool Current;
         readonly Theme theme;
         readonly Label text = MakeLabel(null), meta = MakeLabel("muted"), code = MakeLabel(null), hint = MakeLabel("muted");
-        readonly LinkLabel why = new LinkLabel { AutoSize = true, Text = "Чому це?", LinkBehavior = LinkBehavior.HoverUnderline };
+        readonly LinkLabel why = new LinkLabel { AutoSize = true, Text = L.T("Чому це?", "Why?"), LinkBehavior = LinkBehavior.HoverUnderline };
         readonly Panel codeBox = new Panel(), outBox = new Panel { Padding = new Padding(1) };
         readonly TextBox output = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill, Font = new Font("Consolas", 9f) };
         readonly FlowLayoutPanel actions = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = Padding.Empty };
@@ -220,29 +221,29 @@ namespace DeadPixel
             outBox.Visible = false;
             hint.Visible = false;
             why.Visible = !string.IsNullOrEmpty(step.Hint);
-            why.LinkClicked += (s, e) => { hintOpen = !hintOpen; hint.Visible = hintOpen; why.Text = hintOpen ? "Сховати пояснення" : "Чому це?"; Relayout(); };
+            why.LinkClicked += (s, e) => { hintOpen = !hintOpen; hint.Visible = hintOpen; why.Text = hintOpen ? L.T("Сховати пояснення", "Hide explanation") : L.T("Чому це?", "Why?"); Relayout(); };
             hint.Text = step.Hint ?? "";
             codeBox.Visible = step.IsCommand;
 
             if (step.IsCommand)
             {
-                RunBtn = ActionBtn("▶ Виконати", () => Fire(RunClicked));
-                CopyBtn = ActionBtn("Копіювати", () => Fire(CopyClicked));
+                RunBtn = ActionBtn(L.T("▶ Виконати", "▶ Run"), () => Fire(RunClicked));
+                CopyBtn = ActionBtn(L.T("Копіювати", "Copy"), () => Fire(CopyClicked));
             }
-            if (!string.IsNullOrEmpty(step.Open)) OpenBtn = ActionBtn("Відкрити ↗", () => Fire(OpenClicked));
-            if (step.Reboot != null) RebootBtn = ActionBtn(step.Reboot == "firmware" ? "⟳ У BIOS/UEFI" : "⟳ Перезавантажити", () => Fire(RebootClicked));
+            if (!string.IsNullOrEmpty(step.Open)) OpenBtn = ActionBtn(L.T("Відкрити ↗", "Open ↗"), () => Fire(OpenClicked));
+            if (step.Reboot != null) RebootBtn = ActionBtn(step.Reboot == "firmware" ? L.T("⟳ У BIOS/UEFI", "⟳ To BIOS/UEFI") : L.T("⟳ Перезавантажити", "⟳ Restart"), () => Fire(RebootClicked));
             if (!step.IsCommand)
             {
-                Done = new CheckBox { Text = "Зроблено", AutoSize = true, Margin = new Padding(6, 6, 0, 0) };
+                Done = new CheckBox { Text = L.T("Зроблено", "Done"), AutoSize = true, Margin = new Padding(6, 6, 0, 0) };
                 Done.CheckedChanged += (s, e) => { if (!silent) Fire(DoneChanged); };
                 actions.Controls.Add(Done);
             }
 
             var m = new List<string>();
-            if (step.If == "ok") m.Add("лише якщо попередня команда вдалася");
-            if (step.If == "fail") m.Add("лише якщо попередня команда НЕ вдалася");
-            if (step.Admin) m.Add("потрібні права адміністратора");
-            if (!string.IsNullOrEmpty(step.Expect)) m.Add("успіх, якщо у виводі є: " + step.Expect);
+            if (step.If == "ok") m.Add(L.T("лише якщо попередня команда вдалася", "only if the previous command succeeded"));
+            if (step.If == "fail") m.Add(L.T("лише якщо попередня команда НЕ вдалася", "only if the previous command FAILED"));
+            if (step.Admin) m.Add(L.T("потрібні права адміністратора", "requires administrator rights"));
+            if (!string.IsNullOrEmpty(step.Expect)) m.Add(L.T("успіх, якщо у виводі є: ", "succeeds if the output contains: ") + step.Expect);
             meta.Text = string.Join("  ·  ", m);
             meta.Visible = m.Count > 0;
 
@@ -284,7 +285,7 @@ namespace DeadPixel
             if (Done != null) { silent = true; Done.Checked = st == "done" || st == "ok"; silent = false; }
             if (RunBtn != null)
             {
-                RunBtn.Text = st == "running" ? "■ Стоп" : st == "ok" || st == "fail" ? "▶ Ще раз" : st == "skipped" ? "▶ Все одно" : "▶ Виконати";
+                RunBtn.Text = st == "running" ? L.T("■ Стоп", "■ Stop") : st == "ok" || st == "fail" ? L.T("▶ Ще раз", "▶ Again") : st == "skipped" ? L.T("▶ Все одно", "▶ Run anyway") : L.T("▶ Виконати", "▶ Run");
                 RunBtn.ForeColor = st == "running" ? theme.Danger : StateColor("ok", theme);
             }
             Invalidate();
@@ -443,11 +444,11 @@ namespace DeadPixel
                     row.SetOutput(rec.Output);
                 }
                 row.RunClicked += OnRun;
-                row.CopyClicked += r => { try { Clipboard.SetText(Subst(r.Step.Run, true)); Say("Команду скопійовано.", theme.Muted); } catch { } };
+                row.CopyClicked += r => { try { Clipboard.SetText(Subst(r.Step.Run, true)); Say(L.T("Команду скопійовано.", "Command copied."), theme.Muted); } catch { } };
                 row.OpenClicked += r =>
                 {
                     try { Engine.Open(Subst(r.Step.Open, false)); }
-                    catch (Exception ex) { Say("Не вдалося відкрити " + r.Step.Open + ": " + ex.Message, theme.Danger); }
+                    catch (Exception ex) { Say(L.T("Не вдалося відкрити ", "Could not open ") + r.Step.Open + ": " + ex.Message, theme.Danger); }
                 };
                 row.RebootClicked += OnReboot;
                 row.DoneChanged += r => { SetState(r, r.Done.Checked ? "done" : "", null); ApplyConditions(); };
@@ -456,7 +457,7 @@ namespace DeadPixel
             }
             if (rows.Count == 0)
             {
-                var empty = new Label { Text = "Ручних кроків немає — усе робиться автоматично.", AutoSize = true, Tag = "muted", Margin = new Padding(4, 8, 0, 0) };
+                var empty = new Label { Text = L.T("Ручних кроків немає — усе робиться автоматично.", "No manual steps — everything is automatic."), AutoSize = true, Tag = "muted", Margin = new Padding(4, 8, 0, 0) };
                 headers.Add(empty);
                 Controls.Add(empty);
             }
@@ -602,7 +603,7 @@ namespace DeadPixel
         void OnRun(StepRow row)
         {
             if (runningRow == row) { running.Cancel(); runAll = false; return; }
-            if (running != null) { Say("Зачекайте — виконується крок " + (runningRow.Index + 1) + ".", theme.Warn); return; }
+            if (running != null) { Say(string.Format(L.T("Зачекайте — виконується крок {0}.", "Please wait — step {0} is running."), runningRow.Index + 1), theme.Warn); return; }
             runAll = false;
             RunStep(row, null);
         }
@@ -613,7 +614,7 @@ namespace DeadPixel
             var s = row.Step;
             if (s.Admin && !Engine.IsAdmin)
             {
-                Say("Крок " + (row.Index + 1) + " потребує прав адміністратора — натисніть «Перезапустити з правами» вгорі.", theme.Warn);
+                Say(string.Format(L.T("Крок {0} потребує прав адміністратора — натисніть «Перезапустити з правами» вгорі.", "Step {0} needs administrator rights — click \"Restart as administrator\" at the top."), row.Index + 1), theme.Warn);
                 return false;
             }
             var perr = paramError();
@@ -628,7 +629,7 @@ namespace DeadPixel
             row.AppendOutput("> " + cmd);
             SetState(row, "running", null);
             SetRunning(row, run);
-            Say("Виконую крок " + (row.Index + 1) + "…", theme.Muted);
+            Say(string.Format(L.T("Виконую крок {0}…", "Running step {0}…"), row.Index + 1), theme.Muted);
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 bool ok;
@@ -651,14 +652,14 @@ namespace DeadPixel
                     if (ok && !string.IsNullOrEmpty(s.Expect))
                     {
                         try { ok = Regex.IsMatch(outText, s.Expect, RegexOptions.IgnoreCase | RegexOptions.Multiline); }
-                        catch (ArgumentException ex) { ok = false; row.AppendOutput("! неправильний Expect у рецепті: " + ex.Message); }
-                        if (!ok) row.AppendOutput("— у виводі немає очікуваного: " + s.Expect);
+                        catch (ArgumentException ex) { ok = false; row.AppendOutput(L.T("! неправильний Expect у рецепті: ", "! invalid Expect in the recipe: ") + ex.Message); }
+                        if (!ok) row.AppendOutput(L.T("— у виводі немає очікуваного: ", "— the output lacks the expected: ") + s.Expect);
                     }
-                    if (run.Cancelled) row.AppendOutput("— зупинено");
+                    if (run.Cancelled) row.AppendOutput(L.T("— зупинено", "— stopped"));
                     SetState(row, ok ? "ok" : "fail", "> " + cmd + "\r\n" + outText + (err != null ? "! " + err : ""));
                     ApplyConditions();
                     if (after != null) after(ok);
-                    else Say(ok ? "Крок " + (row.Index + 1) + " виконано." : "Крок " + (row.Index + 1) + " не вдався — подивіться вивід.", ok ? StepRow.StateColor("ok", theme) : theme.Danger);
+                    else Say(string.Format(ok ? L.T("Крок {0} виконано.", "Step {0} done.") : L.T("Крок {0} не вдався — подивіться вивід.", "Step {0} failed — see the output."), row.Index + 1), ok ? StepRow.StateColor("ok", theme) : theme.Danger);
                 });
             });
             return true;
@@ -692,17 +693,17 @@ namespace DeadPixel
                     if (!RunStep(r, ok =>
                     {
                         if (ok || HasFailBranch(idx)) Next(idx + 1);
-                        else { runAll = false; Say("Крок " + (idx + 1) + " не вдався — подивіться вивід.", theme.Danger); }
+                        else { runAll = false; Say(string.Format(L.T("Крок {0} не вдався — подивіться вивід.", "Step {0} failed — see the output."), idx + 1), theme.Danger); }
                     })) runAll = false;
                     return;
                 }
                 runAll = false;
                 ScrollControlIntoView(r);
-                Say(r.Step.Reboot != null ? "Крок " + (i + 1) + ": потрібне перезавантаження." : "Крок " + (i + 1) + " — ваша дія. Позначте «Зроблено» і натисніть «Виконати все» знову.", theme.Warn);
+                Say(string.Format(r.Step.Reboot != null ? L.T("Крок {0}: потрібне перезавантаження.", "Step {0}: a restart is needed.") : L.T("Крок {0} — ваша дія. Позначте «Зроблено» і натисніть «Виконати все» знову.", "Step {0} is yours to do. Tick \"Done\" and click \"Run all\" again."), i + 1), theme.Warn);
                 return;
             }
             runAll = false;
-            Say("Усі кроки пройдено ✓", StepRow.StateColor("ok", theme));
+            Say(L.T("Усі кроки пройдено ✓", "All steps completed ✓"), StepRow.StateColor("ok", theme));
         }
 
         public void Reset()
@@ -714,7 +715,7 @@ namespace DeadPixel
             progress.Save();
             ApplyConditions();
             Relayout();
-            Say("Прогрес скинуто.", theme.Muted);
+            Say(L.T("Прогрес скинуто.", "Progress reset."), theme.Muted);
         }
 
         void OnReboot(StepRow row)
@@ -722,11 +723,12 @@ namespace DeadPixel
             bool fw = row.Step.Reboot == "firmware";
             if (fw && !Engine.IsAdmin)
             {
-                Say("Перезавантаження в BIOS/UEFI потребує прав адміністратора — натисніть «Перезапустити з правами» вгорі.", theme.Warn);
+                Say(L.T("Перезавантаження в BIOS/UEFI потребує прав адміністратора — натисніть «Перезапустити з правами» вгорі.", "Restarting into BIOS/UEFI needs administrator rights — click \"Restart as administrator\" at the top."), theme.Warn);
                 return;
             }
-            var q = (fw ? "ПК перезавантажиться одразу в BIOS/UEFI." : "ПК буде перезавантажено.") +
-                    "\n\nЗбережіть відкриту роботу. Прогрес сценарію збережено — після входу в Windows це вікно відкриється на наступному кроці.\n\nПерезавантажити зараз?";
+            var q = (fw ? L.T("ПК перезавантажиться одразу в BIOS/UEFI.", "The PC will restart straight into BIOS/UEFI.") : L.T("ПК буде перезавантажено.", "The PC will restart.")) +
+                    L.T("\n\nЗбережіть відкриту роботу. Прогрес сценарію збережено — після входу в Windows це вікно відкриється на наступному кроці.\n\nПерезавантажити зараз?",
+                        "\n\nSave your open work. Scenario progress is saved — after you sign in to Windows this window reopens at the next step.\n\nRestart now?");
             if (MessageBox.Show(FindForm(), q, "DEADPIXEL", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
 
             SetState(row, "reboot", null);
@@ -744,13 +746,13 @@ namespace DeadPixel
                 using (var p = Process.Start(new ProcessStartInfo("shutdown.exe", fw ? "/r /fw /t 0" : "/r /t 0") { UseShellExecute = false, CreateNoWindow = true }))
                 {
                     p.WaitForExit(10000);
-                    if (p.HasExited && p.ExitCode != 0) throw new Exception("shutdown завершився з кодом " + p.ExitCode + (fw ? " (можливо, плата не підтримує вхід в UEFI з Windows — перезавантажте вручну і тисніть Del/F2)" : ""));
+                    if (p.HasExited && p.ExitCode != 0) throw new Exception(L.T("shutdown завершився з кодом ", "shutdown exited with code ") + p.ExitCode + (fw ? L.T(" (можливо, плата не підтримує вхід в UEFI з Windows — перезавантажте вручну і тисніть Del/F2)", " (the board may not support entering UEFI from Windows — restart manually and press Del/F2)") : ""));
                 }
             }
             catch (Exception ex)
             {
                 SetState(row, "", null);
-                Say("Не вдалося перезавантажити: " + ex.Message, theme.Danger);
+                Say(L.T("Не вдалося перезавантажити: ", "Could not restart: ") + ex.Message, theme.Danger);
             }
         }
 
@@ -793,7 +795,7 @@ namespace DeadPixel
         public SetupForm(string open)
         {
             pendingOpen = open ?? progress.Resume;
-            Text = "DEADPIXEL — Сетап ПК" + (Engine.IsAdmin ? " (адміністратор)" : "");
+            Text = L.T("DEADPIXEL — Сетап ПК", "DEADPIXEL — PC setup") + (Engine.IsAdmin ? L.T(" (адміністратор)", " (administrator)") : "");
             Font = new Font("Segoe UI", 9f);
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -802,7 +804,7 @@ namespace DeadPixel
             StartPosition = FormStartPosition.CenterScreen;
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
-            items = MakeList("Стан", 90, "Налаштування", 330, "Зараз", 170, "Треба", 170);
+            items = MakeList(L.T("Стан", "Status"), 90, L.T("Налаштування", "Setting"), 330, L.T("Зараз", "Current"), 170, L.T("Треба", "Desired"), 170);
             items.ShowGroups = true;
             items.SelectedIndexChanged += (s, e) => ShowItemHint();
             nav.AfterSelect += (s, e) => Select(e.Node.Tag);
@@ -821,7 +823,7 @@ namespace DeadPixel
             nav.BeforeSelect += (s, e) => { if (busy || stepsRunning) e.Cancel = true; };
 
             // ---- ліва колонка: профілі й рецепти
-            btnCheckAll = Btn("Перевірити все", (s, e) => RunCheck("-Recipe *", "Перевіряю всі рецепти…"));
+            btnCheckAll = Btn(L.T("Перевірити все", "Check all"), (s, e) => RunCheck("-Recipe *", L.T("Перевіряю всі рецепти…", "Checking all recipes…")));
             var left = new Panel { Dock = DockStyle.Left, Width = 340, Padding = new Padding(10, 10, 6, 10) };
             var leftBottom = new Panel { Dock = DockStyle.Bottom, Height = 42, Padding = new Padding(0, 8, 0, 0) };
             btnCheckAll.Dock = DockStyle.Fill;
@@ -836,18 +838,18 @@ namespace DeadPixel
             recPage.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
             recPage.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
             recPage.Controls.Add(Card(items), 0, 0);
-            recPage.Controls.Add(Caption("Підказка"), 0, 1);
+            recPage.Controls.Add(Caption(L.T("Підказка", "Hint")), 0, 1);
             recPage.Controls.Add(Card(hint, new Padding(8, 6, 8, 6)), 0, 2);
-            recPage.Controls.Add(Caption("Що зробити вручну"), 0, 3);
+            recPage.Controls.Add(Caption(L.T("Що зробити вручну", "Manual steps")), 0, 3);
             recPage.Controls.Add(recSteps, 0, 4);
             content.Controls.Add(recPage);
 
             // ---- права колонка
             var right = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6, 10, 12, 6) };
             var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(0, 8, 0, 0), WrapContents = false };
-            btnCheck = Btn("Перевірити", (s, e) => RunCheck(SelectionArgs(), "Перевіряю…"));
-            btnApply = Btn("Застосувати", (s, e) => RunChange("-Apply"));
-            btnRevert = Btn("Відкотити", (s, e) => RunChange("-Revert"));
+            btnCheck = Btn(L.T("Перевірити", "Check"), (s, e) => RunCheck(SelectionArgs(), L.T("Перевіряю…", "Checking…")));
+            btnApply = Btn(L.T("Застосувати", "Apply"), (s, e) => RunChange("-Apply"));
+            btnRevert = Btn(L.T("Відкотити", "Revert"), (s, e) => RunChange("-Revert"));
             bar.Controls.AddRange(new Control[] { btnCheck, btnApply, btnRevert, status });
             right.Controls.Add(content);
             right.Controls.Add(tabBar);
@@ -873,7 +875,7 @@ namespace DeadPixel
 
         void LoadCatalog()
         {
-            RunAsync("Завантажую рецепти…", () => Engine.Run<Catalog>("-List", false), res =>
+            RunAsync(L.T("Завантажую рецепти…", "Loading recipes…"), () => Engine.Run<Catalog>("-List", false), res =>
             {
                 var c = (Catalog)res;
                 if (c.Error != null) { SetStatus(c.Error, theme.Danger); return; }
@@ -885,7 +887,7 @@ namespace DeadPixel
                 catalog = c;
                 BuildNav();
                 // одразу перевіряємо все — щоб стан ПК було видно без зайвого кліку
-                RunCheck("-Recipe *", "Перевіряю ПК…");
+                RunCheck("-Recipe *", L.T("Перевіряю ПК…", "Checking the PC…"));
             });
         }
 
@@ -893,9 +895,9 @@ namespace DeadPixel
         {
             nav.BeginUpdate();
             nav.Nodes.Clear();
-            var profiles = nav.Nodes.Add("ПРОФІЛІ");
+            var profiles = nav.Nodes.Add(L.T("ПРОФІЛІ", "PROFILES"));
             foreach (var p in catalog.Profiles) profiles.Nodes.Add(new TreeNode(p.Title) { Tag = p, ToolTipText = p.Description });
-            var recipes = nav.Nodes.Add("РЕЦЕПТИ");
+            var recipes = nav.Nodes.Add(L.T("РЕЦЕПТИ", "RECIPES"));
             foreach (var r in catalog.Recipes) recipes.Nodes.Add(new TreeNode(r.Title) { Tag = r, ToolTipText = r.Description });
             foreach (TreeNode root in nav.Nodes) { root.NodeFont = new Font("Segoe UI Semibold", 8f); root.ForeColor = theme.Muted; }
             nav.ShowNodeToolTips = true;
@@ -980,7 +982,7 @@ namespace DeadPixel
             tabBar.Controls.Clear();
             var r = selected as RecipeInfo;
             var tabs = r != null ? r.Tabs : new List<TabInfo>();
-            if (HasItems) tabBar.Controls.Add(TabBtn("Рекомендовані", currentTab == null, () => ShowTab(null)));
+            if (HasItems) tabBar.Controls.Add(TabBtn(L.T("Рекомендовані", "Recommended"), currentTab == null, () => ShowTab(null)));
             foreach (var t in tabs)
             {
                 var tt = t;
@@ -1007,7 +1009,7 @@ namespace DeadPixel
             {
                 ShowItems();
                 ShowRecSteps();
-                hint.Text = "Виберіть налаштування, щоб побачити пояснення.";
+                hint.Text = L.T("Виберіть налаштування, щоб побачити пояснення.", "Select a setting to see its explanation.");
             }
             else
             {
@@ -1059,7 +1061,7 @@ namespace DeadPixel
                 foreach (var s in r.Steps ?? new List<Step>()) all.Add(new KeyValuePair<string, Step>(p != null ? r.Title : null, s));
                 reboot |= r.Reboot;
             }
-            if (reboot) all.Add(new KeyValuePair<string, Step>(p != null ? "Після застосування" : null, new Step { Text = "Перезавантажте ПК, щоб зміни набули чинності.", Reboot = "restart" }));
+            if (reboot) all.Add(new KeyValuePair<string, Step>(p != null ? L.T("Після застосування", "After applying") : null, new Step { Text = L.T("Перезавантажте ПК, щоб зміни набули чинності.", "Restart the PC for the changes to take effect."), Reboot = "restart" }));
             var key = (p != null ? "profile:" + p.Name : ((RecipeInfo)selected).Name) + "/_recommended";
             recList = new StepList(theme, progress, key, all, null, null);
             recList.Status += SetStatus;
@@ -1083,9 +1085,9 @@ namespace DeadPixel
                 foreach (var kv in boxes)
                 {
                     var v = kv.Value.Text.Trim();
-                    if (v.Length == 0) return "Заповніть параметр «" + (kv.Key.Title ?? kv.Key.Name) + "».";
+                    if (v.Length == 0) return string.Format(L.T("Заповніть параметр «{0}».", "Fill in \"{0}\"."), kv.Key.Title ?? kv.Key.Name);
                     if (!string.IsNullOrEmpty(kv.Key.Pattern) && !Regex.IsMatch(v, "^(?:" + kv.Key.Pattern + ")$"))
-                        return "Параметр «" + (kv.Key.Title ?? kv.Key.Name) + "» має неправильний формат.";
+                        return string.Format(L.T("Параметр «{0}» має неправильний формат.", "\"{0}\" has an invalid format."), kv.Key.Title ?? kv.Key.Name);
                 }
                 return null;
             };
@@ -1097,10 +1099,10 @@ namespace DeadPixel
 
             // Dock=Top додаються знизу вгору: останній доданий — найвище
             var tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, WrapContents = false, Padding = new Padding(0, 4, 0, 4) };
-            tools.Controls.Add(Btn("▶ Виконати все", (s, e) => list.RunAll()));
-            tools.Controls.Add(Btn("Скинути прогрес", (s, e) =>
+            tools.Controls.Add(Btn(L.T("▶ Виконати все", "▶ Run all"), (s, e) => list.RunAll()));
+            tools.Controls.Add(Btn(L.T("Скинути прогрес", "Reset progress"), (s, e) =>
             {
-                if (MessageBox.Show(this, "Скинути позначки й вивід усіх кроків цього сценарію?", "DEADPIXEL", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) == DialogResult.OK) list.Reset();
+                if (MessageBox.Show(this, L.T("Скинути позначки й вивід усіх кроків цього сценарію?", "Reset the marks and output of all steps in this scenario?"), "DEADPIXEL", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) == DialogResult.OK) list.Reset();
             }));
 
             page.Controls.Add(list);
@@ -1138,11 +1140,11 @@ namespace DeadPixel
 
             if (progress.Resume == key)
             {
-                page.Controls.Add(Banner("⟳ Продовжуємо сценарій після перезавантаження — наступний крок підсвічено (" + list.CurrentNumber + ").", null, null));
+                page.Controls.Add(Banner(string.Format(L.T("⟳ Продовжуємо сценарій після перезавантаження — наступний крок підсвічено ({0}).", "⟳ Continuing the scenario after the restart — the next step is highlighted ({0})."), list.CurrentNumber), null, null));
             }
             bool needsAdmin = (t.Steps ?? new List<Step>()).Any(s => s.Admin || s.Reboot == "firmware");
             if (needsAdmin && !Engine.IsAdmin)
-                page.Controls.Add(Banner("Деякі кроки потребують прав адміністратора.", "Перезапустити з правами", () => RelaunchAsAdmin(key)));
+                page.Controls.Add(Banner(L.T("Деякі кроки потребують прав адміністратора.", "Some steps need administrator rights."), L.T("Перезапустити з правами", "Restart as administrator"), () => RelaunchAsAdmin(key)));
 
             list.UpdateDisplay();
             return page;
@@ -1174,7 +1176,7 @@ namespace DeadPixel
             }
             catch (Win32Exception ex)
             {
-                SetStatus(ex.NativeErrorCode == 1223 ? "Скасовано: права адміністратора не надано." : "Не вдалося перезапустити: " + ex.Message, theme.Warn);
+                SetStatus(ex.NativeErrorCode == 1223 ? L.T("Скасовано: права адміністратора не надано.", "Cancelled: administrator rights were not granted.") : L.T("Не вдалося перезапустити: ", "Could not restart: ") + ex.Message, theme.Warn);
             }
         }
 
@@ -1196,12 +1198,12 @@ namespace DeadPixel
                 sb.Append("\r\n\r\n");
                 switch (x.Status)
                 {
-                    case "OK": sb.Append("✓ Налаштовано як треба."); break;
-                    case "DIFF": sb.Append("Зараз: " + x.CurrentText + ". Буде змінено на: " + x.DesiredText + "."); break;
-                    case "NA": sb.Append("Недоступно на цьому ПК: " + x.Message + ". Пункт пропускається."); break;
-                    case "SET": sb.Append("Застосовано (" + x.Message + " → " + x.CurrentText + ")."); break;
-                    case "BACK": sb.Append("Відкочено, зараз: " + x.CurrentText + "."); break;
-                    case "FAIL": sb.Append("Помилка: " + x.Message); break;
+                    case "OK": sb.Append(L.T("✓ Налаштовано як треба.", "✓ Set as recommended.")); break;
+                    case "DIFF": sb.Append(string.Format(L.T("Зараз: {0}. Буде змінено на: {1}.", "Now: {0}. Will change to: {1}."), x.CurrentText, x.DesiredText)); break;
+                    case "NA": sb.Append(string.Format(L.T("Недоступно на цьому ПК: {0}. Пункт пропускається.", "Not available on this PC: {0}. Skipped."), x.Message)); break;
+                    case "SET": sb.Append(string.Format(L.T("Застосовано ({0} → {1}).", "Applied ({0} → {1})."), x.Message, x.CurrentText)); break;
+                    case "BACK": sb.Append(L.T("Відкочено, зараз: ", "Reverted, now: ") + x.CurrentText + "."); break;
+                    case "FAIL": sb.Append(L.T("Помилка: ", "Error: ") + x.Message); break;
                     default: if (!string.IsNullOrEmpty(x.Message)) sb.Append(x.Message); break;
                 }
             }
@@ -1241,12 +1243,12 @@ namespace DeadPixel
             switch (st)
             {
                 case "OK": return "✓ OK";
-                case "DIFF": return "● Інакше";
-                case "NA": return "— Немає";
-                case "SET": return "✓ Змінено";
-                case "BACK": return "↺ Відкочено";
-                case "FAIL": return "✕ Помилка";
-                case "SKIP": return "Пропущено";
+                case "DIFF": return L.T("● Інакше", "● Differs");
+                case "NA": return L.T("— Немає", "— N/A");
+                case "SET": return L.T("✓ Змінено", "✓ Changed");
+                case "BACK": return L.T("↺ Відкочено", "↺ Reverted");
+                case "FAIL": return L.T("✕ Помилка", "✕ Error");
+                case "SKIP": return L.T("Пропущено", "Skipped");
                 default: return "";
             }
         }
@@ -1273,9 +1275,9 @@ namespace DeadPixel
                 if (rr.Error != null) { SetStatus(rr.Error, theme.Danger); return; }
                 Merge(rr);
                 int diff = rr.Recipes.Sum(x => x.Results.Count(i => i.Status == "DIFF"));
-                if (diff == 0) SetStatus("Усе налаштовано як треба.", StatusColor("OK"));
-                else SetStatus("Відхилень: " + diff + ". Виберіть рецепт або профіль і натисніть «Застосувати».", theme.Warn);
-                if (pendingOpen != null && pendingOpen == progress.Resume) SetStatus("Продовжуємо сценарій після перезавантаження.", theme.Accent);
+                if (diff == 0) SetStatus(L.T("Усе налаштовано як треба.", "Everything is set as recommended."), StatusColor("OK"));
+                else SetStatus(string.Format(L.T("Відхилень: {0}. Виберіть рецепт або профіль і натисніть «Застосувати».", "Differences: {0}. Select a recipe or profile and click \"Apply\"."), diff), theme.Warn);
+                if (pendingOpen != null && pendingOpen == progress.Resume) SetStatus(L.T("Продовжуємо сценарій після перезавантаження.", "Continuing the scenario after the restart."), theme.Accent);
                 pendingOpen = null;
             });
         }
@@ -1285,18 +1287,18 @@ namespace DeadPixel
             var rs = SelectedRecipes();
             var name = selected is ProfileInfo ? ((ProfileInfo)selected).Title : rs[0].Title;
             string question;
-            var uac = Engine.IsAdmin ? "" : "\n\nWindows попросить права адміністратора.";
+            var uac = Engine.IsAdmin ? "" : L.T("\n\nWindows попросить права адміністратора.", "\n\nWindows will ask for administrator rights.");
             if (verb == "-Apply")
             {
                 int diff = DiffCount(rs);
-                question = "Застосувати «" + name + "»?\n\n" +
-                           (diff > 0 ? "Буде змінено налаштувань: " + diff + "." : "Перевірка ще не виявила відхилень — зміниться лише те, що відрізняється.") +
-                           "\nПоточні значення збережуться, їх можна буде відкотити." + uac;
+                question = string.Format(L.T("Застосувати «{0}»?\n\n", "Apply \"{0}\"?\n\n"), name) +
+                           (diff > 0 ? string.Format(L.T("Буде змінено налаштувань: {0}.", "Settings to change: {0}."), diff) : L.T("Перевірка ще не виявила відхилень — зміниться лише те, що відрізняється.", "No differences found yet — only what differs will change.")) +
+                           L.T("\nПоточні значення збережуться, їх можна буде відкотити.", "\nCurrent values are saved so you can revert.") + uac;
             }
-            else question = "Відкотити «" + name + "» до значень, що були перед останнім застосуванням?" + uac;
+            else question = string.Format(L.T("Відкотити «{0}» до значень, що були перед останнім застосуванням?", "Revert \"{0}\" to the values from before the last apply?"), name) + uac;
             if (MessageBox.Show(this, question, "DEADPIXEL", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
 
-            RunAsync(verb == "-Apply" ? "Застосовую…" : "Відкочую…", () => Engine.Run<RunResult>(SelectionArgs() + " " + verb, true), res =>
+            RunAsync(verb == "-Apply" ? L.T("Застосовую…", "Applying…") : L.T("Відкочую…", "Reverting…"), () => Engine.Run<RunResult>(SelectionArgs() + " " + verb, true), res =>
             {
                 var rr = (RunResult)res;
                 if (rr.Error != null) { SetStatus(rr.Error, theme.Danger); return; }
@@ -1306,15 +1308,15 @@ namespace DeadPixel
                 if (verb == "-Apply")
                 {
                     int set = all.Count(x => x.Status == "SET");
-                    var msg = set == 0 && fail == 0 ? "Нічого змінювати — усе вже як треба." : "Змінено: " + set + (fail > 0 ? ", помилок: " + fail : "") + ".";
-                    if (recList != null && recList.CurrentNumber > 0) msg += " Перегляньте кроки вручну нижче.";
+                    var msg = set == 0 && fail == 0 ? L.T("Нічого змінювати — усе вже як треба.", "Nothing to change — everything is already set.") : L.T("Змінено: ", "Changed: ") + set + (fail > 0 ? L.T(", помилок: ", ", errors: ") + fail : "") + ".";
+                    if (recList != null && recList.CurrentNumber > 0) msg += L.T(" Перегляньте кроки вручну нижче.", " Review the manual steps below.");
                     SetStatus(msg, fail > 0 ? theme.Danger : StatusColor("OK"));
                 }
                 else
                 {
                     var none = rr.Recipes.Where(x => x.Results.Count == 0).Select(x => x.Title).ToList();
-                    SetStatus("Відкочено: " + all.Count(x => x.Status == "BACK") + (fail > 0 ? ", помилок: " + fail : "") +
-                              (none.Count > 0 ? ". Без бекапу: " + string.Join(", ", none) : "") + ".", fail > 0 ? theme.Danger : theme.Accent);
+                    SetStatus(L.T("Відкочено: ", "Reverted: ") + all.Count(x => x.Status == "BACK") + (fail > 0 ? L.T(", помилок: ", ", errors: ") + fail : "") +
+                              (none.Count > 0 ? L.T(". Без бекапу: ", ". No backup: ") + string.Join(", ", none) : "") + ".", fail > 0 ? theme.Danger : theme.Accent);
                 }
             });
         }
@@ -1350,8 +1352,8 @@ namespace DeadPixel
                         busy = false;
                         UpdateButtons();
                         var w32 = err as Win32Exception;
-                        if (w32 != null && w32.NativeErrorCode == 1223) SetStatus("Скасовано: права адміністратора не надано.", theme.Warn);
-                        else if (err != null) SetStatus("Помилка: " + err.Message, theme.Danger);
+                        if (w32 != null && w32.NativeErrorCode == 1223) SetStatus(L.T("Скасовано: права адміністратора не надано.", "Cancelled: administrator rights were not granted."), theme.Warn);
+                        else if (err != null) SetStatus(L.T("Помилка: ", "Error: ") + err.Message, theme.Danger);
                         else done(res);
                     }));
                 }
@@ -1363,7 +1365,7 @@ namespace DeadPixel
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (stepsRunning && MessageBox.Show(this, "Виконується крок сценарію. Зупинити його й закрити вікно?", "DEADPIXEL", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
+            if (stepsRunning && MessageBox.Show(this, L.T("Виконується крок сценарію. Зупинити його й закрити вікно?", "A scenario step is running. Stop it and close the window?"), "DEADPIXEL", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
                 e.Cancel = true;
             base.OnFormClosing(e);
         }
