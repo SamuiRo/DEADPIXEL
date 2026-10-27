@@ -270,7 +270,8 @@ function Get-Catalog {
             [pscustomobject]@{
                 Name = $r.Name; Title = $r.Title; Description = $r.Description; Reboot = [bool]$r.Reboot
                 HasBackup = [bool](Find-Backup $r.Name); Steps = @(Get-Steps $r); Tabs = @(Get-Tabs $r)
-                Items = @($r.Items | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Title = $_.Title; Hint = $_.Hint; DesiredText = (Format-Value $_ $_.Desired) } })
+                # Where-Object: у рецепта лише зі сценаріями Items = $null, а "$null | ForEach-Object" дав би один порожній пункт
+                Items = @($r.Items | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Title = $_.Title; Hint = $_.Hint; DesiredText = (Format-Value $_ $_.Desired) } })
             }
         })
         Profiles = @($AllProfiles | ForEach-Object {

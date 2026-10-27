@@ -19,7 +19,9 @@ set INFO=%~dp0obj\AssemblyInfo.cs
   /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:System.Management.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ^
   "%INFO%" "%~dp0src\*.cs" || exit /b 1
 
-:: Setup module GUI: shares only the theme with the tray app
-"%CSC%" %COMMON% /out:"%~dp0modules\setup\SetupGui.exe" ^
-  /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:System.Web.Extensions.dll ^
-  "%INFO%" "%~dp0src\Theme.cs" "%~dp0modules\setup\gui\*.cs" || exit /b 1
+:: Module GUIs: share the theme with the tray app and modules\common with each other
+set MODREFS=/r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:System.Web.Extensions.dll
+set MODCOMMON="%INFO%" "%~dp0src\Theme.cs" "%~dp0modules\common\*.cs"
+
+"%CSC%" %COMMON% /out:"%~dp0modules\setup\SetupGui.exe" %MODREFS% %MODCOMMON% "%~dp0modules\setup\gui\*.cs" || exit /b 1
+"%CSC%" %COMMON% /out:"%~dp0modules\audit\AuditGui.exe" %MODREFS% %MODCOMMON% "%~dp0modules\audit\gui\*.cs" || exit /b 1

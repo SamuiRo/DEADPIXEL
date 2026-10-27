@@ -33,13 +33,13 @@ foreach ($f in 'DeadPixel.exe', 'DeadPixel.ps1', 'DeadPixel.cmd', 'README.md', '
 }
 Get-ChildItem (Join-Path $root 'modules') -Recurse -File | Where-Object {
     $rel = $_.FullName.Substring($root.Length + 1)
-    $rel -notmatch '\\gui\\' -and $rel -notmatch '\\data\\'
+    $rel -notmatch '\\(gui|common)\\' -and $rel -notmatch '\\data\\'   # вихідний код GUI вже в exe
 } | ForEach-Object {
     $dest = Join-Path $stage $_.FullName.Substring($root.Length + 1)
     New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
     Copy-Item $_.FullName $dest
 }
-foreach ($exe in 'DeadPixel.exe', 'modules\setup\SetupGui.exe') {
+foreach ($exe in 'DeadPixel.exe', 'modules\setup\SetupGui.exe', 'modules\audit\AuditGui.exe') {
     if (-not (Test-Path (Join-Path $stage $exe))) { throw "Немає $exe — збірка не вдалася?" }
 }
 
