@@ -68,6 +68,8 @@ Filename: "{app}\DeadPixel.exe"; Description: "{cm:LaunchProgram,DEADPIXEL}"; Fl
 [Code]
 // DEADPIXEL не повинен лишати хвостів: прибираємо й те, що програма створила сама, а не інсталятор
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
 begin
   if CurUninstallStep = usUninstall then
   begin
@@ -75,6 +77,9 @@ begin
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\RunOnce', 'DeadPixelSetup');
     DeleteFile(ExpandConstant('{userdesktop}\DEADPIXEL.lnk'));
     DeleteFile(ExpandConstant('{userprograms}\DEADPIXEL.lnk'));
+    // Розклад аудиту створено з правами адміністратора - видалити його можна лише з ними (один UAC, лише якщо розклад є)
+    if Exec(ExpandConstant('{sys}\schtasks.exe'), '/Query /TN "\DEADPIXEL\DEADPIXEL Audit"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+      ShellExec('runas', ExpandConstant('{sys}\schtasks.exe'), '/Delete /TN "\DEADPIXEL\DEADPIXEL Audit" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if CurUninstallStep = usPostUninstall then
   begin

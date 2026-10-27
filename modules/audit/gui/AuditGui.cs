@@ -19,6 +19,12 @@ namespace DeadPixel
         [STAThread]
         static void Main(string[] args)
         {
+            // --background — сканування за розкладом (Планувальник): без вікна, результат забере трей із summary.ini
+            if (args.Contains("--background"))
+            {
+                try { ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Save", false); } catch { }
+                return;
+            }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             // --check <id> — відкрити з виділеною перевіркою (для сповіщень трея)
@@ -37,6 +43,7 @@ namespace DeadPixel
         public string Id { get; set; } public string Area { get; set; } public string Title { get; set; }
         public string Status { get; set; } public string Severity { get; set; } public string Value { get; set; } public string Detail { get; set; }
         public List<string> Evidence { get; set; } public List<string> Files { get; set; } public bool NeedsAdmin { get; set; } public bool Ignored { get; set; }
+        public bool New { get; set; }
         public string Explain { get; set; } public List<string> Pros { get; set; } public List<string> Cons { get; set; }
         public FixInfo Fix { get; set; }
         public bool IsIssue { get { return Status == "issue"; } }
@@ -46,6 +53,7 @@ namespace DeadPixel
     {
         public string Error { get; set; } public string Time { get; set; } public bool IsAdmin { get; set; }
         public int Score { get; set; } public string Grade { get; set; }
+        public int ScheduleDays { get; set; } public int NewCount { get; set; }
         public List<AreaInfo> Areas { get; set; } public List<CheckResult> Results { get; set; }
     }
 
@@ -60,10 +68,11 @@ namespace DeadPixel
         readonly Label score = new Label { AutoSize = true, Font = new Font("Segoe UI Semibold", 30f), Margin = new Padding(0, 0, 12, 0) };
         readonly Label grade = new Label { AutoSize = true, Font = new Font("Segoe UI Semibold", 13f), Margin = new Padding(0, 10, 0, 0) };
         readonly Label when = new Label { AutoSize = true, Tag = "muted", Margin = new Padding(0, 2, 0, 0) };
-        readonly FlowLayoutPanel areaBar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 64, WrapContents = false, AutoScroll = false, Padding = new Padding(0, 4, 0, 6) };
+        // Картки переносяться на другий рядок, коли областей більше, ніж уміщує ширина вікна
+        readonly FlowLayoutPanel areaBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Padding = new Padding(0, 4, 0, 6) };
         readonly ListView list;
         readonly RichTextBox details = new RichTextBox { ReadOnly = true, BorderStyle = BorderStyle.None, Tag = "surface", DetectUrls = false, ScrollBars = RichTextBoxScrollBars.Vertical };
-        readonly Button btnScan, btnScanAdmin, btnSetup, btnFix, btnOpen, btnDefender, btnIgnore;
+        readonly Button btnScan, btnScanAdmin, btnSchedule, btnHtml, btnSetup, btnFix, btnOpen, btnDefender, btnIgnore;
         readonly Label status = new Label { AutoSize = true, Padding = new Padding(6, 7, 0, 0), Tag = "muted" };
 
         public AuditForm(string check)
@@ -81,6 +90,8 @@ namespace DeadPixel
             // ---- шапка: оцінка і кнопки
             btnScan = Ui.Btn("Сканувати", (s, e) => Scan(false));
             btnScanAdmin = Ui.Btn("Сканувати з правами", (s, e) => Scan(true));
+            btnSchedule = Ui.Btn("Розклад…", (s, e) => EditSchedule());
+            btnHtml = Ui.Btn("Звіт HTML", (s, e) => ExportHtml());
             btnSetup = Ui.Btn("Сетап ПК…", (s, e) => OpenSetup(null));
             var scoreBox = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Dock = DockStyle.Left };
             var gradeBox = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
@@ -89,7 +100,7 @@ namespace DeadPixel
             scoreBox.Controls.Add(score);
             scoreBox.Controls.Add(gradeBox);
             var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Dock = DockStyle.Right, Padding = new Padding(0, 14, 0, 0) };
-            actions.Controls.AddRange(new Control[] { btnScanAdmin, btnScan, btnSetup });
+            actions.Controls.AddRange(new Control[] { btnScanAdmin, btnScan, btnSchedule, btnHtml, btnSetup });
             var header = new Panel { Dock = DockStyle.Top, Height = 70 };
             header.Controls.Add(scoreBox);
             header.Controls.Add(actions);
@@ -180,7 +191,9 @@ namespace DeadPixel
                 if (r.Error != null) { SetStatus(r.Error, theme.Danger); return; }
                 ShowReport(r);
                 int n = r.Results.Count(x => x.IsIssue && !x.Ignored);
-                SetStatus(n == 0 ? "Проблем не знайдено." : "Знайдено проблем: " + n + ". Виберіть рядок, щоб побачити пояснення і що зробити.", n == 0 ? ModuleHost.Ok(theme) : theme.Warn);
+                SetStatus(n == 0 ? "Проблем не знайдено." :
+                    "Знайдено проблем: " + n + (r.NewCount > 0 ? ", нових з минулого сканування: " + r.NewCount : "") + ". Виберіть рядок, щоб побачити пояснення і що зробити.",
+                    n == 0 ? ModuleHost.Ok(theme) : theme.Warn);
             });
         }
 
@@ -214,12 +227,15 @@ namespace DeadPixel
                 ShowDetails();
                 return;
             }
+            // Побачене у вікні трей уже не повідомлятиме (той самий файл, що й у TrayApp.CheckAudit)
+            try { if (!string.IsNullOrEmpty(r.Time)) File.WriteAllText(Path.Combine(ModuleHost.DataDir("audit"), "notified.txt"), r.Time); } catch { }
             score.Text = r.Score.ToString();
             score.ForeColor = grade.ForeColor = ScoreColor(r.Score);
             grade.Text = r.Grade;
             DateTime t;
             when.Text = (DateTime.TryParse(r.Time, out t) ? "Сканування " + t.ToString("dd.MM.yyyy HH:mm") : "") +
-                        (r.IsAdmin ? " · з правами адміністратора" : "");
+                        (r.IsAdmin ? " · з правами адміністратора" : "") +
+                        (r.ScheduleDays > 0 ? " · автоматично раз на " + r.ScheduleDays + " дн." : " · розклад вимкнено");
             if (area != null && !r.Areas.Any(a => a.Id == area)) area = null;
             BuildAreaBar();
             FillList();
@@ -246,7 +262,7 @@ namespace DeadPixel
         KeyValuePair<Button, int> AreaButton(string id, string title, int issues)
         {
             var text = title + "\n" + (issues == 0 ? "проблем немає" : issues + " " + Plural(issues, "проблема", "проблеми", "проблем"));
-            var b = new Button { Text = text, AutoSize = true, MinimumSize = new Size(150, 50), Padding = new Padding(10, 2, 10, 2), Margin = new Padding(0, 0, 6, 0), TextAlign = ContentAlignment.MiddleLeft, Tag = id == area ? "tab-selected" : "tab" };
+            var b = new Button { Text = text, AutoSize = true, MinimumSize = new Size(150, 50), Padding = new Padding(10, 2, 10, 2), Margin = new Padding(0, 0, 6, 4), TextAlign = ContentAlignment.MiddleLeft, Tag = id == area ? "tab-selected" : "tab" };
             b.Click += (s, e) => { if (busy) return; area = id; BuildAreaBar(); FillList(); };
             return new KeyValuePair<Button, int>(b, issues);
         }
@@ -283,7 +299,8 @@ namespace DeadPixel
                 }
                 foreach (var r in report.Results.Where(x => groups.ContainsKey(x.Area)).OrderBy(Rank))
                 {
-                    var lvi = new ListViewItem(new[] { StatusText(r), r.Title, r.Value }, groups[r.Area]) { Tag = r, UseItemStyleForSubItems = false, ToolTipText = r.Detail };
+                    var title = r.New && !r.Ignored ? r.Title + "   · нове" : r.Title;
+                    var lvi = new ListViewItem(new[] { StatusText(r), title, r.Value }, groups[r.Area]) { Tag = r, UseItemStyleForSubItems = false, ToolTipText = r.Detail };
                     lvi.SubItems[0].ForeColor = StatusColor(r);
                     lvi.SubItems[0].Font = new Font(list.Font, FontStyle.Bold);
                     if (r.Ignored || r.Status == "na") lvi.SubItems[1].ForeColor = lvi.SubItems[2].ForeColor = theme.Muted;
@@ -318,6 +335,7 @@ namespace DeadPixel
             Add(r.Title + "\n", theme.Fg, true, 13f);
             Add(StatusLong(r) + (string.IsNullOrEmpty(r.Value) ? "" : "  ·  " + r.Value) + "\n", StatusColor(r), true, 10f);
             if (!string.IsNullOrEmpty(r.Detail)) Add(r.Detail + "\n", theme.Fg, false, 10f);
+            if (r.New && !r.Ignored) Add("Нове з минулого сканування.\n", theme.Accent, true, 9.5f);
             if (r.Ignored) Add("Ви позначили це як свідомий вибір — знахідка не враховується в оцінці.\n", theme.Muted, false, 9.5f);
             if (r.NeedsAdmin) Add("Щоб перевірити точно, натисніть «Сканувати з правами».\n", theme.Warn, false, 9.5f);
 
@@ -345,14 +363,23 @@ namespace DeadPixel
             Add(text + "\n", theme.Accent, true, 10.5f);
         }
 
+        // Пункти списку: висячий відступ (перенесені рядки — під текстом, а не під маркером) і невеликий проміжок
+        // між пунктами — довгі докази зі шляхами інакше зливаються в суцільний текст
         void Bullets(IEnumerable<string> items, Color mark, string prefix)
         {
+            bool first = true;
             foreach (var s in items)
             {
+                if (!first) Add("\n", theme.Fg, false, 4f);
+                first = false;
+                hanging = 16;
                 Add(prefix, mark, true, 10f);
                 Add(s + "\n", theme.Fg, false, 10f);
+                hanging = 0;
             }
         }
+
+        int hanging;   // висячий відступ абзацу, який зараз вставляється (пікселі)
 
         // AppendText у RichTextBox губить колір/шрифт виділення після кількох рядків; SelectedText — ні
         // (ReadOnly на час вставки знімаємо: інакше вставка ігнорується)
@@ -361,6 +388,7 @@ namespace DeadPixel
             details.ReadOnly = false;
             details.SelectionStart = details.TextLength;
             details.SelectionLength = 0;
+            details.SelectionHangingIndent = hanging;
             details.SelectionColor = color;
             details.SelectionFont = new Font("Segoe UI", size, bold ? FontStyle.Bold : FontStyle.Regular);
             details.SelectedText = text;
@@ -473,6 +501,58 @@ namespace DeadPixel
             });
         }
 
+        // Розклад — завдання Планувальника з найвищими правами (бачить усі процеси), тому зміна потребує UAC
+        void EditSchedule()
+        {
+            int current = report != null ? report.ScheduleDays : 0;
+            using (var dlg = new Form { Text = "Розклад аудиту", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false,
+                                        StartPosition = FormStartPosition.CenterParent, Font = Font, AutoScaleMode = AutoScaleMode.Dpi, AutoScaleDimensions = new SizeF(96f, 96f),
+                                        ClientSize = new Size(470, 230), ShowInTaskbar = false })
+            {
+                var on = new CheckBox { Text = "Сканувати автоматично", Checked = current > 0, AutoSize = true, Location = new Point(18, 18) };
+                var lbl = new Label { Text = "раз на", AutoSize = true, Location = new Point(40, 54) };
+                var days = new NumericUpDown { Minimum = 1, Maximum = 30, Value = current > 0 ? current : 3, Width = 60, Location = new Point(96, 50) };
+                var lbl2 = new Label { Text = "дн.", AutoSize = true, Location = new Point(162, 54) };
+                var info = new Label { Tag = "muted", Location = new Point(18, 90), Size = new Size(434, 84),
+                    Text = "Аудит запуститься у фоні з низьким пріоритетом (о 12:00, або щойно ПК увімкнуть, якщо час пропущено) і займе кілька секунд. " +
+                           "Трей повідомить лише про нові серйозні проблеми. Зміна розкладу потребує прав адміністратора: з ними аудит бачить усі процеси." };
+                var ok = new Button { Text = "Зберегти", DialogResult = DialogResult.OK, AutoSize = true, Location = new Point(270, 186) };
+                var cancel = new Button { Text = "Скасувати", DialogResult = DialogResult.Cancel, AutoSize = true, Location = new Point(362, 186) };
+                on.CheckedChanged += (s, e) => days.Enabled = lbl.Enabled = lbl2.Enabled = on.Checked;
+                days.Enabled = lbl.Enabled = lbl2.Enabled = on.Checked;
+                dlg.Controls.AddRange(new Control[] { on, lbl, days, lbl2, info, ok, cancel });
+                dlg.AcceptButton = ok; dlg.CancelButton = cancel;
+                dlg.Load += (s, e) => { theme.Apply(dlg); theme.ApplyTitleBar(dlg); };
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                int n = on.Checked ? (int)days.Value : 0;
+                if (n == current) return;
+                RunAsync("Зберігаю розклад…", () => ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Schedule " + n, true), res =>
+                {
+                    var r = Normalize((AuditReport)res);
+                    if (r.Error != null) { SetStatus(r.Error, theme.Danger); return; }
+                    if (report != null) { report.ScheduleDays = r.ScheduleDays; ShowReport(report); }
+                    SetStatus(r.ScheduleDays > 0 ? "Аудит запускатиметься автоматично раз на " + r.ScheduleDays + " дн." : "Автоматичний аудит вимкнено.", theme.Muted);
+                });
+            }
+        }
+
+        // HTML-звіт — у reports\ поруч із програмою (там і звіти DeadPixel.ps1), інакше в %LOCALAPPDATA%\DeadPixel\reports
+        void ExportHtml()
+        {
+            if (report == null) { SetStatus("Спершу запустіть сканування.", theme.Warn); return; }
+            var dir = Path.GetFullPath(Path.Combine(ModuleHost.Dir, @"..\..\reports"));
+            try { Directory.CreateDirectory(dir); File.WriteAllText(Path.Combine(dir, ".write-test"), ""); File.Delete(Path.Combine(dir, ".write-test")); }
+            catch { dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"DeadPixel\reports"); }
+            var path = Path.Combine(dir, "audit-" + DateTime.Now.ToString("yyyyMMdd-HHmm") + ".html");
+            RunAsync("Створюю звіт…", () => ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Html \"" + path + "\"", false), res =>
+            {
+                var r = (AuditReport)res;
+                if (r.Error != null) { SetStatus(r.Error, theme.Danger); return; }
+                SetStatus("Звіт: " + path, theme.Muted);
+                TryOpen(path);
+            });
+        }
+
         void TryOpen(string what)
         {
             try { ModuleHost.Open(what); }
@@ -507,7 +587,7 @@ namespace DeadPixel
 
         void UpdateBusy()
         {
-            btnScan.Enabled = btnScanAdmin.Enabled = !busy;
+            btnScan.Enabled = btnScanAdmin.Enabled = btnSchedule.Enabled = btnHtml.Enabled = !busy;
             btnFix.Enabled = btnOpen.Enabled = btnDefender.Enabled = btnIgnore.Enabled = !busy;
             UseWaitCursor = busy;
         }

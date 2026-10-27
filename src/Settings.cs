@@ -21,6 +21,7 @@ namespace DeadPixel
         public bool NotifyUsb = true;
         public bool NotifyApp = false;
         public bool NotifyTemp = true;
+        public bool NotifyAudit = true;      // нові серйозні проблеми з аудиту за розкладом
         public int GpuTempWarn = 85;
         public int CpuTempWarn = 90;
 

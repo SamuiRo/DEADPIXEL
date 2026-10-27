@@ -275,6 +275,7 @@ namespace DeadPixel
             Check(t, "Збої USB", s.NotifyUsb, v => { s.NotifyUsb = v; s.Save(); });
             Check(t, "Падіння програм", s.NotifyApp, v => { s.NotifyApp = v; s.Save(); });
             Check(t, "Висока температура / сповільнення GPU", s.NotifyTemp, v => { s.NotifyTemp = v; s.Save(); });
+            Check(t, "Нові серйозні проблеми з аудиту системи", s.NotifyAudit, v => { s.NotifyAudit = v; s.Save(); });
             Number(t, "Поріг температури GPU, °C", s.GpuTempWarn, 50, 110, v => { s.GpuTempWarn = v; s.Save(); });
             Number(t, "Поріг температури CPU, °C", s.CpuTempWarn, 50, 110, v => { s.CpuTempWarn = v; s.Save(); });
 

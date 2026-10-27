@@ -6,8 +6,9 @@
   посилається на рецепт через Fix.Recipe.
 
   Перевірки - checks\<область>.ps1, кожен файл повертає:
-    @{ Id; Title; Order; Checks = @( @{ Id; Title; Admin; Test = { ... }; Explain; Pros; Cons; Fix }, ... ) }
+    @{ Id; Title; Order; Checks = @( @{ Id; Title; Admin; Prepare = { ... }; Test = { ... }; Explain; Pros; Cons; Fix }, ... ) }
   Test повертає результат через Ok / Issue / Unknown / NotApplicable (нічого = Ok).
+  Prepare (необов'язково) запускається до всіх Test - щоб почати довгу роботу (winget) паралельно з рештою перевірок.
   Fix = @{ Recipe = 'назва рецепта Setup'; Open = 'ms-settings:...'; Steps = @('що зробити вручну') }.
 
   Логіка повертає об'єкти; консоль і GUI (AuditGui.exe, через -OutFile) лише показують їх.
@@ -17,6 +18,8 @@
   .\Audit.ps1 -Check hvci,secure-boot # лише вибрані перевірки
   .\Audit.ps1 -Save                   # зберегти як останній звіт (data\audit\latest.json) + в історію
   .\Audit.ps1 -Ignore guest           # більше не рахувати знахідку (свідомий вибір); -Unignore повертає
+  .\Audit.ps1 -Html report.html       # останній звіт як HTML-сторінка
+  .\Audit.ps1 -Schedule 3             # сканувати автоматично раз на 3 дні (потрібні права адміністратора); 0 - вимкнути
   .\Audit.ps1 -List
 #>
 param(
@@ -26,6 +29,8 @@ param(
     [switch]$Save,
     [string]$Ignore,
     [string]$Unignore,
+    [string]$Html,
+    [int]$Schedule = -1,
     [string]$OutFile   # машинний режим для GUI: результат як JSON у файл, без виводу в консоль
 )
 
@@ -316,7 +321,7 @@ function Invoke-Check($area, $c, [bool]$admin) {
         Id = $c.Id; Area = $area.Id; Title = $c.Title
         Status = $r.Status; Severity = [string]$r.Severity; Value = [string]$r.Value; Detail = [string]$r.Detail
         Evidence = @($r.Evidence | Where-Object { $_ }); Files = @($r.Files | Where-Object { $_ } | Select-Object -Unique)
-        NeedsAdmin = [bool]$r.NeedsAdmin; Ignored = $false
+        NeedsAdmin = [bool]$r.NeedsAdmin; Ignored = $false; New = $false
         Explain = [string]$c.Explain; Pros = @($c.Pros | Where-Object { $_ }); Cons = @($c.Cons | Where-Object { $_ })
         Fix = [pscustomobject]@{
             Recipe = [string]$fix.Recipe; Open = [string]$fix.Open; Steps = @($fix.Steps | Where-Object { $_ })
@@ -327,13 +332,14 @@ function Invoke-Check($area, $c, [bool]$admin) {
 
 # ---------------------------------------------------------------- оцінка
 
-# Одна критична діра важить більше, ніж десяток дрібниць: вона обмежує оцінку зверху
+# Кожна знахідка забирає відсоток від того, що лишилося (а не фіксовані бали): інакше що більше перевірок,
+# то гірше виглядав би будь-який ПК. Одна критична діра важить більше, ніж десяток дрібниць: вона обмежує оцінку зверху
 $Weights = @{ critical = 40; high = 15; medium = 6; low = 2 }
 
 function Get-Score($results) {
     $active = @($results | Where-Object { $_.Status -eq 'issue' -and -not $_.Ignored })
-    $sum = 0; foreach ($r in $active) { $sum += $Weights[$r.Severity] }
-    $score = [Math]::Max(0, 100 - $sum)
+    $left = 1.0; foreach ($r in $active) { $left *= 1 - $Weights[$r.Severity] / 100 }
+    $score = [int][Math]::Round(100 * $left)
     if ($active | Where-Object { $_.Severity -eq 'critical' }) { $score = [Math]::Min($score, 39) }
     elseif ($active | Where-Object { $_.Severity -eq 'high' }) { $score = [Math]::Min($score, 79) }
     $score
@@ -353,6 +359,50 @@ function Write-IgnoreList([string[]]$ids) {
     ConvertTo-Json -InputObject @($ids | Sort-Object -Unique) | Set-Content -Encoding UTF8 (Join-Path (Get-DataDir) 'ignore.json')
 }
 
+# ---------------------------------------------------------------- розклад (Планувальник завдань)
+
+$TaskPath = '\DEADPIXEL\'
+$TaskName = 'DEADPIXEL Audit'
+
+function Get-ScheduleDays {
+    try {
+        $t = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop
+        if ($t.State -eq 'Disabled') { return 0 }
+        [int](@($t.Triggers)[0].DaysInterval)
+    } catch { 0 }
+}
+
+# Завдання запускає AuditGui.exe --background: це winexe, тож жодне вікно консолі не блимає.
+# Найвищі права - щоб бачити системні процеси й підписки WMI; тому й створення розкладу потребує UAC
+function Set-Schedule([int]$days) {
+    if (-not (Test-Admin)) { throw 'Щоб налаштувати розклад, потрібні права адміністратора.' }
+    Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    if ($days -le 0) { return }
+    $gui = Join-Path $PSScriptRoot 'AuditGui.exe'
+    if (-not (Test-Path $gui)) { throw "Не знайдено $gui" }
+    $action = New-ScheduledTaskAction -Execute $gui -Argument '--background'
+    $trigger = New-ScheduledTaskTrigger -Daily -DaysInterval $days -At '12:00'
+    # Пропущений запуск (ПК був вимкнений) - одразу, щойно ПК увімкнуть; низький пріоритет; не довше 15 хв
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -Priority 7 -MultipleInstances IgnoreNew
+    $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Highest
+    Register-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
+        -Description 'DEADPIXEL: перевірка безпеки і стану системи. Лише читає систему; результат - у треї і вікні «Аудит системи».' | Out-Null
+}
+
+# ---------------------------------------------------------------- звіт
+
+# «Нове» - проблема, якої не було в попередньому повному звіті (або яка стала серйознішою).
+# Перше сканування нічого не позначає новим, щоб не засипати сповіщеннями
+function Set-NewFlags($results) {
+    $f = Join-Path (Get-DataDir) 'latest.json'
+    if (-not (Test-Path $f)) { return }
+    $prev = @{}
+    try { foreach ($r in (Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json).Results) { if ($r.Status -eq 'issue') { $prev[$r.Id] = $Weights[$r.Severity] } } } catch { return }
+    foreach ($r in $results) {
+        $r.New = $r.Status -eq 'issue' -and (-not $prev.ContainsKey($r.Id) -or $Weights[$r.Severity] -gt $prev[$r.Id])
+    }
+}
+
 # Звіт: оцінка загалом і по областях; ігноровані знахідки видно, але вони не рахуються
 function New-Report($areas, $results, [bool]$admin, [string]$time) {
     $ignored = Read-IgnoreList
@@ -360,6 +410,7 @@ function New-Report($areas, $results, [bool]$admin, [string]$time) {
     $score = Get-Score $results
     [pscustomobject]@{
         Error = $null; Time = $time; IsAdmin = $admin; Score = $score; Grade = Get-Grade $score
+        ScheduleDays = Get-ScheduleDays; NewCount = @($results | Where-Object { $_.New -and -not $_.Ignored }).Count
         Areas = @($areas | ForEach-Object {
             $id = $_.Id
             $mine = @($results | Where-Object { $_.Area -eq $id })
@@ -377,10 +428,11 @@ function New-Report($areas, $results, [bool]$admin, [string]$time) {
 function Invoke-Audit {
     $admin = Test-Admin
     $areas = @(Read-Areas | Where-Object { Test-Match $_.Id $Area })
-    $results = foreach ($a in $areas) {
-        foreach ($c in $a.Checks) { if (Test-Match $c.Id $Check) { Invoke-Check $a $c $admin } }
-    }
+    $selected = @(foreach ($a in $areas) { foreach ($c in $a.Checks) { if (Test-Match $c.Id $Check) { @{ Area = $a; Check = $c } } } })
+    foreach ($s in $selected) { if ($s.Check.Prepare -and -not ($s.Check.Admin -and -not $admin)) { try { & $s.Check.Prepare } catch { } } }
+    $results = foreach ($s in $selected) { Invoke-Check $s.Area $s.Check $admin }
     Save-SigCache
+    Set-NewFlags @($results)
     New-Report $areas @($results) $admin (Get-Date).ToString('s')
 }
 
@@ -393,6 +445,27 @@ function Save-Report($report) {
     $json | Set-Content -Encoding UTF8 (Join-Path $hist ('report-{0:yyyyMMdd-HHmmss}.json' -f (Get-Date)))
     # історія потрібна для "що нового з минулого разу" - 30 звітів більш ніж достатньо
     Get-ChildItem $hist -Filter 'report-*.json' | Sort-Object Name -Descending | Select-Object -Skip 30 | Remove-Item -Force
+    Write-Summary $report
+}
+
+# Короткий підсумок для трея (ключ=значення): трей лише читає цей файл раз на хвилину і не розбирає JSON
+function Write-Summary($report) {
+    $alerts = @($report.Results | Where-Object { $_.New -and -not $_.Ignored -and $_.Severity -in 'critical', 'high' })
+    $first = if ($alerts) { $alerts[0] } else { $null }
+    @(
+        "Time=$($report.Time)", "Score=$($report.Score)", "Grade=$($report.Grade)", "Alerts=$($alerts.Count)",
+        "AlertId=$(if ($first) { $first.Id })", "AlertTitle=$(if ($first) { $first.Title })", "AlertValue=$(if ($first) { $first.Value })"
+    ) | Set-Content -Encoding UTF8 (Join-Path (Get-DataDir) 'summary.ini')
+}
+
+# Останній збережений звіт з актуальними списком ігнорованого і розкладом - без нового сканування
+function Read-Latest {
+    $latest = Join-Path (Get-DataDir) 'latest.json'
+    if (-not (Test-Path $latest)) { throw 'Ще немає звіту - спершу запустіть сканування.' }
+    $old = Get-Content $latest -Raw -Encoding UTF8 | ConvertFrom-Json
+    $areas = @($old.Areas | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Title = $_.Title } })
+    foreach ($r in $old.Results) { if ($null -eq $r.PSObject.Properties['New']) { $r | Add-Member New $false } }
+    New-Report $areas @($old.Results) ([bool]$old.IsAdmin) $old.Time
 }
 
 # -Ignore / -Unignore: оновити список і перерахувати останній звіт без нового сканування
@@ -401,13 +474,63 @@ function Update-Ignore {
     if ($Ignore) { $ids += $Ignore }
     if ($Unignore) { $ids = @($ids | Where-Object { $_ -ne $Unignore }) }
     Write-IgnoreList $ids
-    $latest = Join-Path (Get-DataDir) 'latest.json'
-    if (-not (Test-Path $latest)) { throw 'Ще немає звіту - спершу запустіть сканування.' }
-    $old = Get-Content $latest -Raw -Encoding UTF8 | ConvertFrom-Json
-    $areas = @($old.Areas | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Title = $_.Title } })
-    $report = New-Report $areas @($old.Results) ([bool]$old.IsAdmin) $old.Time
-    ConvertTo-Json -InputObject $report -Depth 6 | Set-Content -Encoding UTF8 $latest
+    $report = Read-Latest
+    ConvertTo-Json -InputObject $report -Depth 6 | Set-Content -Encoding UTF8 (Join-Path (Get-DataDir) 'latest.json')
+    Write-Summary $report
     $report
+}
+
+# ---------------------------------------------------------------- HTML-звіт (щоб показати комусь, хто розбирається)
+
+function ConvertTo-HtmlText([string]$s) { [Net.WebUtility]::HtmlEncode($s) }
+
+function Export-Html($report, [string]$path) {
+    $os = Get-OsInfo
+    $sev = @{ critical = 'Критично'; high = 'Високий'; medium = 'Середній'; low = 'Низький' }
+    $sb = New-Object Text.StringBuilder
+    $t = [datetime]$report.Time
+    $null = $sb.Append(@"
+<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Аудит системи DEADPIXEL</title><style>
+:root{--bg:#f3f4f6;--card:#fff;--fg:#1c1f24;--muted:#6b7280;--line:#dadee4;--ok:#16873c;--warn:#b46400;--bad:#c62828;--info:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#16181c;--card:#202329;--fg:#e5e7eb;--muted:#969eaa;--line:#343942;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--info:#60a5fa}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 48px}h1{margin:0 0 4px;font-size:26px}h2{margin:32px 0 10px;font-size:19px}
+.muted{color:var(--muted)}.score{font-size:44px;font-weight:600;margin-right:12px}.head{display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.item{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:8px 0}
+.item.ok,.item.na,.item.ign{padding:6px 14px}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
+.chip{font-weight:600;min-width:92px}.title{font-weight:600;flex:1}.value{color:var(--muted)}
+.critical .chip,.high .chip{color:var(--bad)}.medium .chip,.low .chip{color:var(--warn)}.ok .chip{color:var(--ok)}.info .chip{color:var(--info)}.na .chip,.unknown .chip,.ign .chip{color:var(--muted)}
+ul{margin:6px 0 0;padding-left:20px}li{margin:3px 0;overflow-wrap:anywhere}h3{font-size:13px;margin:10px 0 0;color:var(--info);text-transform:uppercase;letter-spacing:.04em}
+footer{margin-top:32px;font-size:13px}
+</style></head><body><main>
+<h1>Аудит системи</h1>
+<div class="muted">$(ConvertTo-HtmlText "$($os.Name), збірка $($os.Build).$($os.Ubr) · сканування $($t.ToString('dd.MM.yyyy HH:mm'))$(if ($report.IsAdmin) { ' · з правами адміністратора' })")</div>
+<div class="head" style="margin-top:14px"><span class="score">$($report.Score)</span><span><b>$(ConvertTo-HtmlText $report.Grade)</b><br><span class="muted">загальна оцінка з 100</span></span></div>
+"@)
+    foreach ($a in $report.Areas) {
+        $null = $sb.Append("<h2>$(ConvertTo-HtmlText $a.Title) <span class=`"muted`">· $($a.Score)</span></h2>`n")
+        $rank = @{ critical = 0; high = 1; medium = 2; low = 3 }
+        $mine = @($report.Results | Where-Object { $_.Area -eq $a.Id } | Sort-Object { if ($_.Ignored) { 9 } elseif ($_.Status -eq 'issue') { $rank[$_.Severity] } elseif ($_.Status -eq 'unknown') { 4 } elseif ($_.Status -eq 'info') { 5 } elseif ($_.Status -eq 'ok') { 6 } else { 7 } })
+        foreach ($r in $mine) {
+            $cls = if ($r.Ignored) { 'ign' } elseif ($r.Status -eq 'issue') { $r.Severity } else { $r.Status }
+            $chip = if ($r.Ignored) { 'Ігнорується' } elseif ($r.Status -eq 'issue') { $sev[$r.Severity] } else { @{ ok = 'Гаразд'; info = 'Інфо'; unknown = 'Невідомо'; na = 'Н/д' }[$r.Status] }
+            $null = $sb.Append("<div class=`"item $cls`"><div class=`"row`"><span class=`"chip`">$chip</span><span class=`"title`">$(ConvertTo-HtmlText $r.Title)</span><span class=`"value`">$(ConvertTo-HtmlText $r.Value)</span></div>")
+            if ($r.Status -in 'issue', 'info', 'unknown' -and -not $r.Ignored) {
+                if ($r.Detail) { $null = $sb.Append("<div>$(ConvertTo-HtmlText $r.Detail)</div>") }
+                if ($r.Status -eq 'issue') {
+                    if ($r.Explain) { $null = $sb.Append("<h3>Що це</h3><div>$(ConvertTo-HtmlText $r.Explain)</div>") }
+                    if ($r.Cons) { $null = $sb.Append('<h3>Мінуси і на що зважити</h3><ul>' + (($r.Cons | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
+                }
+                if ($r.Evidence) { $null = $sb.Append('<h3>Докази</h3><ul>' + (($r.Evidence | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
+                if ($r.Status -eq 'issue' -and $r.Fix.Steps) { $null = $sb.Append('<h3>Як виправити</h3><ul>' + (($r.Fix.Steps | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
+            }
+            $null = $sb.Append("</div>`n")
+        }
+    }
+    $null = $sb.Append('<footer class="muted">Створено DEADPIXEL. Звіт містить відомості про цей ПК (програми, шляхи, мережі) - показуйте його лише тим, кому довіряєте.</footer></main></body></html>')
+    New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+    [IO.File]::WriteAllText($path, $sb.ToString(), (New-Object Text.UTF8Encoding $false))
 }
 
 # ---------------------------------------------------------------- консоль
@@ -446,9 +569,17 @@ if ($List) {
 }
 
 try {
-    $report = if ($Ignore -or $Unignore) { Update-Ignore } else { Invoke-Audit }
-    # Частковий звіт (-Area/-Check) не замінює повний: інакше GUI і порівняння з минулим скануванням бачили б лише його
-    if ($Save -and -not ($Ignore -or $Unignore -or $Area -or $Check)) { Save-Report $report }
+    if ($Schedule -ge 0) {
+        Set-Schedule $Schedule
+        $report = try { Read-Latest } catch { [pscustomobject]@{ Error = $null; Results = @(); Areas = @(); ScheduleDays = Get-ScheduleDays } }
+    }
+    elseif ($Html) { $report = Read-Latest; Export-Html $report $Html }
+    elseif ($Ignore -or $Unignore) { $report = Update-Ignore }
+    else {
+        $report = Invoke-Audit
+        # Частковий звіт (-Area/-Check) не замінює повний: інакше GUI і порівняння з минулим скануванням бачили б лише його
+        if ($Save -and -not ($Area -or $Check)) { Save-Report $report }
+    }
 } catch {
     if ($OutFile) {
         ConvertTo-Json -InputObject ([pscustomobject]@{ Error = $_.Exception.Message; Results = @() }) | Set-Content -Encoding UTF8 $OutFile
@@ -462,6 +593,8 @@ if ($OutFile) {
     ConvertTo-Json -InputObject $report -Depth 6 | Set-Content -Encoding UTF8 $OutFile
     exit 0
 }
+if ($Schedule -ge 0) { Write-Host $(if ($Schedule -gt 0) { "Аудит запускатиметься автоматично раз на $Schedule дн." } else { 'Автоматичний аудит вимкнено.' }); exit 0 }
+if ($Html) { Write-Host "Звіт: $Html"; exit 0 }
 Write-Report $report
 # Код виходу = кількість активних критичних і високих знахідок (0 - немає), 255 - помилка запуску
 exit [Math]::Min(254, @($report.Results | Where-Object { $_.Status -eq 'issue' -and -not $_.Ignored -and $_.Severity -in 'critical', 'high' }).Count)

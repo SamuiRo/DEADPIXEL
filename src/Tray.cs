@@ -25,6 +25,12 @@ namespace DeadPixel
         readonly Dictionary<string, DateTime> lastNotify = new Dictionary<string, DateTime>();
         readonly Icon icoOk, icoWarn, icoAlert, icoApp;
         readonly string stateFile = Path.Combine(Program.DataDir, "last-seen-crash.txt");
+        // Підсумок аудиту пише Audit.ps1; notified.txt — час звіту, про який уже повідомлено або який бачили у вікні аудиту
+        readonly string auditSummary = Path.Combine(Program.DataDir, "audit", "summary.ini");
+        readonly string auditNotified = Path.Combine(Program.DataDir, "audit", "notified.txt");
+        DateTime auditStamp;
+        int auditTick;
+        Action balloonClick;    // що відкрити на клік по поточному сповіщенню; null — панель «Краші»
         Dashboard dash;
         bool unseenCrash;
 
@@ -46,7 +52,12 @@ namespace DeadPixel
             tray.Text = "DEADPIXEL";
             tray.Visible = true;
             tray.DoubleClick += (s, e) => ShowDashboard(null);
-            tray.BalloonTipClicked += (s, e) => ShowDashboard("Краші");
+            tray.BalloonTipClicked += (s, e) =>
+            {
+                var a = balloonClick;
+                balloonClick = null;
+                if (a != null) a(); else ShowDashboard("Краші");
+            };
 
             Settings.Changed += OnSettingsChanged;
             Sampler.Start();
@@ -67,7 +78,7 @@ namespace DeadPixel
                 ui.Post(__ => OnCrashesLoaded(crashes), null);
             });
 
-            timer.Tick += (s, e) => { UpdateTray(); CheckTemps(); };
+            timer.Tick += (s, e) => { UpdateTray(); CheckTemps(); CheckAudit(); };
             timer.Start();
         }
 
@@ -141,6 +152,7 @@ namespace DeadPixel
                         var txt = string.Format("{0:dd.MM HH:mm} — {1}{2}", c.Boot, BugChecks.Get(c.Code)[0], c.Driver != "" ? " (" + c.Driver + ")" : "");
                         if (c.LastFg != "") txt += "\nОстання активна програма: " + c.LastFg;
                         if (fresh.Count > 1) txt += string.Format("\nНових крашів: {0}", fresh.Count);
+                        balloonClick = null;
                         tray.ShowBalloonTip(15000, "Комп'ютер перезавантажився через збій", txt + "\nНатисніть, щоб подивитися деталі.", ToolTipIcon.Error);
                     }
                 }
@@ -169,7 +181,55 @@ namespace DeadPixel
             DateTime last;
             if (lastNotify.TryGetValue(key, out last) && DateTime.Now - last < cooldown) return;
             lastNotify[key] = DateTime.Now;
+            balloonClick = null;
             tray.ShowBalloonTip(10000, title, text.Length > 200 ? text.Substring(0, 200) + "…" : text, icon);
+        }
+
+        // Аудит за розкладом працює окремим процесом; трей раз на хвилину дивиться лише дату summary.ini
+        // і повідомляє про нові серйозні проблеми (критичні й високі), яких ще не бачили
+        void CheckAudit()
+        {
+            if (++auditTick < 12) return;
+            auditTick = 0;
+            DateTime stamp;
+            try
+            {
+                if (!File.Exists(auditSummary)) return;
+                stamp = File.GetLastWriteTimeUtc(auditSummary);
+            }
+            catch { return; }
+            if (stamp == auditStamp) return;
+            auditStamp = stamp;
+            if (!Settings.NotifyAudit) return;
+
+            var kv = new Dictionary<string, string>();
+            try
+            {
+                foreach (var line in File.ReadAllLines(auditSummary))
+                {
+                    int i = line.IndexOf('=');
+                    if (i > 0) kv[line.Substring(0, i)] = line.Substring(i + 1).Trim();
+                }
+            }
+            catch { return; }
+            string time, id, title, value, count;
+            int alerts;
+            kv.TryGetValue("Time", out time);
+            kv.TryGetValue("AlertId", out id);
+            kv.TryGetValue("AlertTitle", out title);
+            kv.TryGetValue("AlertValue", out value);
+            kv.TryGetValue("Alerts", out count);
+            if (!int.TryParse(count, out alerts) || alerts == 0 || string.IsNullOrEmpty(time)) return;
+            string seen = "";
+            try { if (File.Exists(auditNotified)) seen = File.ReadAllText(auditNotified).Trim(); } catch { }
+            if (seen == time) return;
+            try { File.WriteAllText(auditNotified, time); } catch { }
+
+            balloonClick = () => RunModule(@"audit\AuditGui.exe", "--check \"" + id + "\"");
+            var text = (title ?? "") + (string.IsNullOrEmpty(value) ? "" : ": " + value);
+            if (alerts > 1) text += "\nІ ще: " + (alerts - 1);
+            tray.ShowBalloonTip(15000, alerts == 1 ? "Аудит системи: нова серйозна проблема" : "Аудит системи: нових серйозних проблем — " + alerts,
+                text + "\nНатисніть, щоб побачити пояснення і що зробити.", ToolTipIcon.Warning);
         }
 
         void OnLiveEvent(EvItem it)
@@ -248,11 +308,14 @@ namespace DeadPixel
         }
 
         // Модулі (modules\) — окремі процеси на вимогу: трей їх лише запускає і нічого не тримає в пам'яті
-        public static void RunModule(string relPath)
+        public static void RunModule(string relPath) { RunModule(relPath, ""); }
+
+        public static void RunModule(string relPath, string args)
         {
             var path = Path.Combine(Program.BaseDir, "modules", relPath);
-            if (File.Exists(path)) Open(path);
-            else MessageBox.Show("Не знайдено модуль " + path, "DEADPIXEL");
+            if (!File.Exists(path)) { MessageBox.Show("Не знайдено модуль " + path, "DEADPIXEL"); return; }
+            try { Process.Start(new ProcessStartInfo(path, args) { UseShellExecute = true }); }
+            catch (Exception ex) { MessageBox.Show(ex.Message, "DEADPIXEL"); }
         }
 
         public static void Open(string path)
