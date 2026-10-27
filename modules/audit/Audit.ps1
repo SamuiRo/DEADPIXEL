@@ -31,11 +31,16 @@ param(
     [string]$Unignore,
     [string]$Html,
     [int]$Schedule = -1,
+    [string]$Lang,       # uk | en; без нього - з data\settings.ini (як у трей-програми)
     [string]$OutFile   # машинний режим для GUI: результат як JSON у файл, без виводу в консоль
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# Мова текстів (перевірки формують пояснення нею): T 'українською' 'English'
+. (Join-Path (Split-Path $PSScriptRoot) 'common\Lang.ps1')
+$script:UiLang = Resolve-UiLang $Lang (Split-Path (Split-Path $PSScriptRoot))
 
 # Дані поруч із програмою (data\audit); якщо туди писати не можна - %LOCALAPPDATA%\DeadPixel\audit (як у трей-програми)
 function Get-DataDir {
@@ -167,10 +172,10 @@ function Get-PathRisk([string]$Path) {
     $p = $Path.ToLowerInvariant()
     $temp = [IO.Path]::GetTempPath().ToLowerInvariant()
     if ($p.StartsWith($temp) -or $p -match '\\appdata\\local\\temp\\|\\downloads\\|\\\$recycle\.bin\\' -or ($env:PUBLIC -and $p.StartsWith($env:PUBLIC.ToLowerInvariant() + '\'))) {
-        return @{ Points = 2; Why = 'запущено з тимчасової папки або «Завантажень»' }
+        return @{ Points = 2; Why = (T 'запущено з тимчасової папки або «Завантажень»' 'started from a temporary folder or Downloads') }
     }
-    if ($p -match '^[a-z]:\\programdata\\[^\\]+$') { return @{ Points = 2; Why = 'файл лежить просто в корені ProgramData' } }
-    if ($p -match '\\appdata\\') { return @{ Points = 1; Why = 'папка профілю користувача (AppData)' } }
+    if ($p -match '^[a-z]:\\programdata\\[^\\]+$') { return @{ Points = 2; Why = (T 'файл лежить просто в корені ProgramData' 'the file sits directly in the ProgramData root') } }
+    if ($p -match '\\appdata\\') { return @{ Points = 1; Why = (T 'папка профілю користувача (AppData)' 'a user profile folder (AppData)') } }
     @{ Points = 0; Why = '' }
 }
 
@@ -179,15 +184,15 @@ function Get-CommandRisk([string]$Cmd) {
     $why = @(); $points = 0
     if (-not $Cmd) { return @{ Points = 0; Why = $why } }
     if ($Cmd -match '(?i)(powershell|pwsh)' -and $Cmd -match '(?i)(downloadstring|downloadfile|net\.webclient|invoke-webrequest|\biwr\b|start-bitstransfer).*(\biex\b|invoke-expression)|(\biex\b|invoke-expression).*(downloadstring|net\.webclient)') {
-        $points += 4; $why += 'PowerShell завантажує і одразу виконує код з інтернету'
+        $points += 4; $why += (T 'PowerShell завантажує і одразу виконує код з інтернету' 'PowerShell downloads and immediately runs code from the internet')
     } elseif ($Cmd -match '(?i)(powershell|pwsh).*\s-e(nc|ncodedcommand)?\s+[a-z0-9+/=]{20,}') {
-        $points += 3; $why += 'PowerShell із закодованою командою (так ховають, що виконується; буває і в легітимних інструментів)'
+        $points += 3; $why += (T 'PowerShell із закодованою командою (так ховають, що виконується; буває і в легітимних інструментів)' 'PowerShell with an encoded command (hides what runs; legitimate tools do it too)')
     }
-    if ($Cmd -match '(?i)mshta(\.exe)?["\s]+(https?:|javascript:|vbscript:)') { $points += 4; $why += 'mshta виконує скрипт з інтернету' }
-    if ($Cmd -match '(?i)rundll32(\.exe)?["\s].*javascript:') { $points += 4; $why += 'rundll32 виконує JavaScript' }
-    if ($Cmd -match '(?i)regsvr32(\.exe)?.*\/i:\s*https?:|scrobj\.dll') { $points += 4; $why += 'regsvr32 завантажує скрипт (техніка Squiblydoo)' }
-    if ($Cmd -match '(?i)certutil(\.exe)?.*(-urlcache|-decode)') { $points += 3; $why += 'certutil завантажує або розкодовує файл' }
-    if ($Cmd -match '(?i)(wscript|cscript)(\.exe)?.*\\(appdata|temp|downloads|users\\public)\\.*\.(js|jse|vbs|vbe|wsf)') { $points += 3; $why += 'скрипт Windows Script Host з папки користувача' }
+    if ($Cmd -match '(?i)mshta(\.exe)?["\s]+(https?:|javascript:|vbscript:)') { $points += 4; $why += (T 'mshta виконує скрипт з інтернету' 'mshta runs a script from the internet') }
+    if ($Cmd -match '(?i)rundll32(\.exe)?["\s].*javascript:') { $points += 4; $why += (T 'rundll32 виконує JavaScript' 'rundll32 runs JavaScript') }
+    if ($Cmd -match '(?i)regsvr32(\.exe)?.*\/i:\s*https?:|scrobj\.dll') { $points += 4; $why += (T 'regsvr32 завантажує скрипт (техніка Squiblydoo)' 'regsvr32 loads a script (the Squiblydoo technique)') }
+    if ($Cmd -match '(?i)certutil(\.exe)?.*(-urlcache|-decode)') { $points += 3; $why += (T 'certutil завантажує або розкодовує файл' 'certutil downloads or decodes a file') }
+    if ($Cmd -match '(?i)(wscript|cscript)(\.exe)?.*\\(appdata|temp|downloads|users\\public)\\.*\.(js|jse|vbs|vbe|wsf)') { $points += 3; $why += (T 'скрипт Windows Script Host з папки користувача' 'a Windows Script Host script from a user folder') }
     @{ Points = $points; Why = $why }
 }
 
@@ -244,17 +249,17 @@ function Measure-File([string]$Path, [string]$base) {
         # Справжні компоненти Windows бувають і поза папкою Windows (Defender - у ProgramData): вирішує підпис Microsoft
         $sig = Get-FileSignature $Path
         if (-not ($sig -and $sig.Status -eq 'Valid' -and $sig.Signer -match 'Microsoft')) {
-            $points += 5; $why += "ім'я системного процесу Windows, але файл не в папці Windows і не підписаний Microsoft"
+            $points += 5; $why += (T "ім'я системного процесу Windows, але файл не в папці Windows і не підписаний Microsoft" "a Windows system process name, but the file is outside the Windows folder and not signed by Microsoft")
         }
     } else {
         $typo = Get-Typosquat $base
-        if ($typo) { $points += 4; $why += "ім'я майже як у системного «$typo» - типове маскування" }
+        if ($typo) { $points += 4; $why += (T "ім'я майже як у системного «$typo» - типове маскування" "the name nearly matches the system '$typo' - typical disguise") }
     }
     # Підпис перевіряємо лише в підозрілих місцях: у Windows/Program Files він майже завжди є, а перевірка коштує часу
     if ($Path -and -not $sig -and ($loc.Points -gt 0 -or $points -gt 0)) { $sig = Get-FileSignature $Path }
     if ($sig -and $loc.Points -gt 0) {
-        if ($sig.Status -eq 'NotSigned') { $points += $(if ($loc.Points -ge 2) { 2 } else { 1 }); $why += 'файл не має цифрового підпису' }
-        elseif ($sig.Status -notin 'Valid', 'NotSigned', 'UnknownError') { $points += 4; $why += "підпис недійсний ($($sig.Status)) - файл могли змінити" }
+        if ($sig.Status -eq 'NotSigned') { $points += $(if ($loc.Points -ge 2) { 2 } else { 1 }); $why += (T 'файл не має цифрового підпису' 'the file has no digital signature') }
+        elseif ($sig.Status -notin 'Valid', 'NotSigned', 'UnknownError') { $points += 4; $why += (T "підпис недійсний ($($sig.Status)) - файл могли змінити" "invalid signature ($($sig.Status)) - the file may have been modified") }
     }
     @{ Points = $points; Why = $why; Signature = $sig }
 }
@@ -362,7 +367,7 @@ public static class DeadPixelDirSize {
 }
 
 function Format-Size([long]$b) {
-    if ($b -ge 1GB) { '{0:N1} ГБ' -f ($b / 1GB) } elseif ($b -ge 1MB) { '{0:N0} МБ' -f ($b / 1MB) } else { '{0:N0} КБ' -f ($b / 1KB) }
+    if ($b -ge 1GB) { (T '{0:N1} ГБ' '{0:N1} GB') -f ($b / 1GB) } elseif ($b -ge 1MB) { (T '{0:N0} МБ' '{0:N0} MB') -f ($b / 1MB) } else { (T '{0:N0} КБ' '{0:N0} KB') -f ($b / 1KB) }
 }
 
 # Ноутбук/планшет: від цього залежить, наскільки важливе шифрування диска
@@ -385,9 +390,9 @@ function Test-Match([string]$value, [string[]]$patterns) {
 
 function Invoke-Check($area, $c, [bool]$admin) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    if ($c.Admin -and -not $admin) { $r = Unknown 'Для цієї перевірки потрібні права адміністратора.' -Admin }
+    if ($c.Admin -and -not $admin) { $r = Unknown (T 'Для цієї перевірки потрібні права адміністратора.' 'This check needs administrator rights.') -Admin }
     else {
-        try { $r = & $c.Test } catch { $r = Unknown ('Не вдалося перевірити: ' + $_.Exception.Message) }
+        try { $r = & $c.Test } catch { $r = Unknown ((T 'Не вдалося перевірити: ' 'Could not check: ') + $_.Exception.Message) }
         if ($r -is [array]) { $r = $r[-1] }   # випадковий вивід із Test не повинен зламати результат
         if (-not $r) { $r = Ok }
     }
@@ -422,7 +427,7 @@ function Get-Score($results) {
 }
 
 function Get-Grade([int]$score) {
-    if ($score -ge 85) { 'Добре' } elseif ($score -ge 70) { 'Є що покращити' } elseif ($score -ge 40) { 'Ризиковано' } else { 'Небезпечно' }
+    if ($score -ge 85) { T 'Добре' 'Good' } elseif ($score -ge 70) { T 'Є що покращити' 'Room to improve' } elseif ($score -ge 40) { T 'Ризиковано' 'Risky' } else { T 'Небезпечно' 'Dangerous' }
 }
 
 function Read-IgnoreList {
@@ -463,7 +468,7 @@ function Set-Schedule([int]$days) {
     try { Set-ScheduleCore $days }
     catch {
         if (-not (Test-Admin) -and ($_.Exception.Message -match 'denied|0x80070005|заборон' -or $_.CategoryInfo.Category -eq 'PermissionDenied')) {
-            throw 'NEEDS_ADMIN: розклад створено з правами адміністратора - змінити його можна лише з ними.'
+            throw ('NEEDS_ADMIN: ' + (T 'розклад створено з правами адміністратора - змінити його можна лише з ними.' 'the schedule was created with administrator rights - it can only be changed with them.'))
         }
         throw
     }
@@ -473,14 +478,14 @@ function Set-ScheduleCore([int]$days) {
     if (Get-ScheduleTask) { Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false -ErrorAction Stop }
     if ($days -le 0) { return }
     $gui = Join-Path $PSScriptRoot 'AuditGui.exe'
-    if (-not (Test-Path $gui)) { throw "Не знайдено $gui" }
+    if (-not (Test-Path $gui)) { throw ((T 'Не знайдено ' 'Not found: ') + $gui) }
     $action = New-ScheduledTaskAction -Execute $gui -Argument '--background'
     $trigger = New-ScheduledTaskTrigger -Daily -DaysInterval $days -At '12:00'
     # Пропущений запуск (ПК був вимкнений) - одразу, щойно ПК увімкнуть; низький пріоритет; не довше 15 хв
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -Priority 7 -MultipleInstances IgnoreNew
     $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
-        -Description 'DEADPIXEL: перевірка безпеки і стану системи. Лише читає систему; результат - у треї і вікні «Аудит системи».' -ErrorAction Stop | Out-Null
+        -Description (T 'DEADPIXEL: перевірка безпеки і стану системи. Лише читає систему; результат - у треї і вікні «Аудит системи».' 'DEADPIXEL: security and system health check. Read-only; results appear in the tray and the "System audit" window.') -ErrorAction Stop | Out-Null
 }
 
 # ---------------------------------------------------------------- звіт
@@ -503,7 +508,7 @@ function New-Report($areas, $results, [bool]$admin, [string]$time) {
     foreach ($r in $results) { $r.Ignored = $ignored -contains $r.Id }
     $score = Get-Score $results
     [pscustomobject]@{
-        Error = $null; Time = $time; IsAdmin = $admin; Score = $score; Grade = Get-Grade $score
+        Error = $null; Time = $time; IsAdmin = $admin; Score = $score; Grade = Get-Grade $score; Lang = $UiLang
         ScheduleDays = Get-ScheduleDays; NewCount = @($results | Where-Object { $_.New -and -not $_.Ignored }).Count
         Areas = @($areas | ForEach-Object {
             $id = $_.Id
@@ -555,7 +560,7 @@ function Write-Summary($report) {
 # Останній збережений звіт з актуальними списком ігнорованого і розкладом - без нового сканування
 function Read-Latest {
     $latest = Join-Path (Get-DataDir) 'latest.json'
-    if (-not (Test-Path $latest)) { throw 'Ще немає звіту - спершу запустіть сканування.' }
+    if (-not (Test-Path $latest)) { throw (T 'Ще немає звіту - спершу запустіть сканування.' 'There is no report yet - run a scan first.') }
     $old = Get-Content $latest -Raw -Encoding UTF8 | ConvertFrom-Json
     $areas = @($old.Areas | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Title = $_.Title } })
     foreach ($r in $old.Results) { if ($null -eq $r.PSObject.Properties['New']) { $r | Add-Member New $false } }
@@ -580,12 +585,12 @@ function ConvertTo-HtmlText([string]$s) { [Net.WebUtility]::HtmlEncode($s) }
 
 function Export-Html($report, [string]$path) {
     $os = Get-OsInfo
-    $sev = @{ critical = 'Критично'; high = 'Високий'; medium = 'Середній'; low = 'Низький' }
+    $sev = @{ critical = (T 'Критично' 'Critical'); high = (T 'Високий' 'High'); medium = (T 'Середній' 'Medium'); low = (T 'Низький' 'Low') }
     $sb = New-Object Text.StringBuilder
     $t = [datetime]$report.Time
     $null = $sb.Append(@"
-<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Аудит системи DEADPIXEL</title><style>
+<!doctype html><html lang="$UiLang"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$(T 'Аудит системи DEADPIXEL' 'DEADPIXEL system audit')</title><style>
 :root{--bg:#f3f4f6;--card:#fff;--fg:#1c1f24;--muted:#6b7280;--line:#dadee4;--ok:#16873c;--warn:#b46400;--bad:#c62828;--info:#2563eb}
 @media (prefers-color-scheme:dark){:root{--bg:#16181c;--card:#202329;--fg:#e5e7eb;--muted:#969eaa;--line:#343942;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--info:#60a5fa}}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
@@ -598,9 +603,9 @@ main{max-width:980px;margin:0 auto;padding:24px 16px 48px}h1{margin:0 0 4px;font
 ul{margin:6px 0 0;padding-left:20px}li{margin:3px 0;overflow-wrap:anywhere}h3{font-size:13px;margin:10px 0 0;color:var(--info);text-transform:uppercase;letter-spacing:.04em}
 footer{margin-top:32px;font-size:13px}
 </style></head><body><main>
-<h1>Аудит системи</h1>
-<div class="muted">$(ConvertTo-HtmlText "$($os.Name), збірка $($os.Build).$($os.Ubr) · сканування $($t.ToString('dd.MM.yyyy HH:mm'))$(if ($report.IsAdmin) { ' · з правами адміністратора' })")</div>
-<div class="head" style="margin-top:14px"><span class="score">$($report.Score)</span><span><b>$(ConvertTo-HtmlText $report.Grade)</b><br><span class="muted">загальна оцінка з 100</span></span></div>
+<h1>$(T 'Аудит системи' 'System audit')</h1>
+<div class="muted">$(ConvertTo-HtmlText ("$($os.Name), " + (T 'збірка ' 'build ') + "$($os.Build).$($os.Ubr) · " + (T 'сканування ' 'scanned ') + $t.ToString('dd.MM.yyyy HH:mm') + $(if ($report.IsAdmin) { T ' · з правами адміністратора' ' · as administrator' })))</div>
+<div class="head" style="margin-top:14px"><span class="score">$($report.Score)</span><span><b>$(ConvertTo-HtmlText $report.Grade)</b><br><span class="muted">$(T 'загальна оцінка з 100' 'overall score out of 100')</span></span></div>
 "@)
     foreach ($a in $report.Areas) {
         $null = $sb.Append("<h2>$(ConvertTo-HtmlText $a.Title) <span class=`"muted`">· $($a.Score)</span></h2>`n")
@@ -608,21 +613,21 @@ footer{margin-top:32px;font-size:13px}
         $mine = @($report.Results | Where-Object { $_.Area -eq $a.Id } | Sort-Object { if ($_.Ignored) { 9 } elseif ($_.Status -eq 'issue') { $rank[$_.Severity] } elseif ($_.Status -eq 'unknown') { 4 } elseif ($_.Status -eq 'info') { 5 } elseif ($_.Status -eq 'ok') { 6 } else { 7 } })
         foreach ($r in $mine) {
             $cls = if ($r.Ignored) { 'ign' } elseif ($r.Status -eq 'issue') { $r.Severity } else { $r.Status }
-            $chip = if ($r.Ignored) { 'Ігнорується' } elseif ($r.Status -eq 'issue') { $sev[$r.Severity] } else { @{ ok = 'Гаразд'; info = 'Інфо'; unknown = 'Невідомо'; na = 'Н/д' }[$r.Status] }
+            $chip = if ($r.Ignored) { T 'Ігнорується' 'Ignored' } elseif ($r.Status -eq 'issue') { $sev[$r.Severity] } else { @{ ok = (T 'Гаразд' 'OK'); info = (T 'Інфо' 'Info'); unknown = (T 'Невідомо' 'Unknown'); na = (T 'Н/д' 'N/A') }[$r.Status] }
             $null = $sb.Append("<div class=`"item $cls`"><div class=`"row`"><span class=`"chip`">$chip</span><span class=`"title`">$(ConvertTo-HtmlText $r.Title)</span><span class=`"value`">$(ConvertTo-HtmlText $r.Value)</span></div>")
             if ($r.Status -in 'issue', 'info', 'unknown' -and -not $r.Ignored) {
                 if ($r.Detail) { $null = $sb.Append("<div>$(ConvertTo-HtmlText $r.Detail)</div>") }
                 if ($r.Status -eq 'issue') {
-                    if ($r.Explain) { $null = $sb.Append("<h3>Що це</h3><div>$(ConvertTo-HtmlText $r.Explain)</div>") }
-                    if ($r.Cons) { $null = $sb.Append('<h3>Мінуси і на що зважити</h3><ul>' + (($r.Cons | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
+                    if ($r.Explain) { $null = $sb.Append("<h3>$(T 'Що це' 'What it is')</h3><div>$(ConvertTo-HtmlText $r.Explain)</div>") }
+                    if ($r.Cons) { $null = $sb.Append(('<h3>' + (T 'Мінуси і на що зважити' 'Cons and things to consider') + '</h3><ul>') + (($r.Cons | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
                 }
-                if ($r.Evidence) { $null = $sb.Append('<h3>Докази</h3><ul>' + (($r.Evidence | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
-                if ($r.Status -eq 'issue' -and $r.Fix.Steps) { $null = $sb.Append('<h3>Як виправити</h3><ul>' + (($r.Fix.Steps | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
+                if ($r.Evidence) { $null = $sb.Append(('<h3>' + (T 'Докази' 'Evidence') + '</h3><ul>') + (($r.Evidence | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
+                if ($r.Status -eq 'issue' -and $r.Fix.Steps) { $null = $sb.Append(('<h3>' + (T 'Як виправити' 'How to fix') + '</h3><ul>') + (($r.Fix.Steps | ForEach-Object { "<li>$(ConvertTo-HtmlText $_)</li>" }) -join '') + '</ul>') }
             }
             $null = $sb.Append("</div>`n")
         }
     }
-    $null = $sb.Append('<footer class="muted">Створено DEADPIXEL. Звіт містить відомості про цей ПК (програми, шляхи, мережі) - показуйте його лише тим, кому довіряєте.</footer></main></body></html>')
+    $null = $sb.Append('<footer class="muted">' + (T 'Створено DEADPIXEL. Звіт містить відомості про цей ПК (програми, шляхи, мережі) - показуйте його лише тим, кому довіряєте.' 'Created by DEADPIXEL. The report contains information about this PC (programs, paths, networks) - share it only with people you trust.') + '</footer></main></body></html>')
     New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
     [IO.File]::WriteAllText($path, $sb.ToString(), (New-Object Text.UTF8Encoding $false))
 }
@@ -630,8 +635,8 @@ footer{margin-top:32px;font-size:13px}
 # ---------------------------------------------------------------- консоль
 
 $Tags = @{
-    critical = @('КРИТ', 'Red'); high = @('ВИС ', 'Red'); medium = @('СЕР ', 'Yellow'); low = @('НИЗ ', 'DarkYellow')
-    ok = @(' OK ', 'Green'); info = @('ІНФО', 'Cyan'); unknown = @(' ?  ', 'DarkGray'); na = @(' —  ', 'DarkGray')
+    critical = @((T 'КРИТ' 'CRIT'), 'Red'); high = @((T 'ВИС ' 'HIGH'), 'Red'); medium = @((T 'СЕР ' 'MED '), 'Yellow'); low = @((T 'НИЗ ' 'LOW '), 'DarkYellow')
+    ok = @(' OK ', 'Green'); info = @((T 'ІНФО' 'INFO'), 'Cyan'); unknown = @(' ?  ', 'DarkGray'); na = @(' —  ', 'DarkGray')
 }
 
 function Write-Report($report) {
@@ -642,15 +647,15 @@ function Write-Report($report) {
             $t = if ($r.Status -eq 'issue') { $Tags[$r.Severity] } else { $Tags[$r.Status] }
             Write-Host ('  [{0}] ' -f $t[0]) -ForegroundColor $t[1] -NoNewline
             Write-Host $r.Title -NoNewline
-            Write-Host ("  $($r.Value)" + $(if ($r.Ignored) { '  (ігнорується)' } else { '' })) -ForegroundColor DarkGray
+            Write-Host ("  $($r.Value)" + $(if ($r.Ignored) { T '  (ігнорується)' '  (ignored)' } else { '' })) -ForegroundColor DarkGray
             if ($r.Status -in 'issue', 'unknown' -and $r.Detail -and -not $r.Ignored) { Write-Host "         $($r.Detail)" -ForegroundColor DarkGray }
         }
     }
     Write-Host
     $color = if ($report.Score -ge 85) { 'Green' } elseif ($report.Score -ge 40) { 'Yellow' } else { 'Red' }
-    Write-Host ('Загальна оцінка: {0}/100 - {1}' -f $report.Score, $report.Grade) -ForegroundColor $color
+    Write-Host ((T 'Загальна оцінка: {0}/100 - {1}' 'Overall score: {0}/100 - {1}') -f $report.Score, $report.Grade) -ForegroundColor $color
     if (-not $report.IsAdmin -and ($report.Results | Where-Object { $_.NeedsAdmin })) {
-        Write-Host 'Частину перевірок пропущено: запустіть з правами адміністратора (Audit.cmd).' -ForegroundColor DarkGray
+        Write-Host (T 'Частину перевірок пропущено: запустіть з правами адміністратора (Audit.cmd).' 'Some checks were skipped: run as administrator (Audit.cmd).') -ForegroundColor DarkGray
     }
 }
 
@@ -687,8 +692,8 @@ if ($OutFile) {
     ConvertTo-Json -InputObject $report -Depth 6 | Set-Content -Encoding UTF8 $OutFile
     exit 0
 }
-if ($Schedule -ge 0) { Write-Host $(if ($Schedule -gt 0) { "Аудит запускатиметься автоматично раз на $Schedule дн." } else { 'Автоматичний аудит вимкнено.' }); exit 0 }
-if ($Html) { Write-Host "Звіт: $Html"; exit 0 }
+if ($Schedule -ge 0) { Write-Host $(if ($Schedule -gt 0) { T "Аудит запускатиметься автоматично раз на $Schedule дн." "The audit will run automatically every $Schedule days." } else { T 'Автоматичний аудит вимкнено.' 'Automatic audit is off.' }); exit 0 }
+if ($Html) { Write-Host ((T 'Звіт: ' 'Report: ') + $Html); exit 0 }
 Write-Report $report
 # Код виходу = кількість активних критичних і високих знахідок (0 - немає), 255 - помилка запуску
 exit [Math]::Min(254, @($report.Results | Where-Object { $_.Status -eq 'issue' -and -not $_.Ignored -and $_.Severity -in 'critical', 'high' }).Count)
