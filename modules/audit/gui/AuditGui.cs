@@ -36,7 +36,7 @@ namespace DeadPixel
     {
         public string Id { get; set; } public string Area { get; set; } public string Title { get; set; }
         public string Status { get; set; } public string Severity { get; set; } public string Value { get; set; } public string Detail { get; set; }
-        public List<string> Evidence { get; set; } public bool NeedsAdmin { get; set; } public bool Ignored { get; set; }
+        public List<string> Evidence { get; set; } public List<string> Files { get; set; } public bool NeedsAdmin { get; set; } public bool Ignored { get; set; }
         public string Explain { get; set; } public List<string> Pros { get; set; } public List<string> Cons { get; set; }
         public FixInfo Fix { get; set; }
         public bool IsIssue { get { return Status == "issue"; } }
@@ -63,7 +63,7 @@ namespace DeadPixel
         readonly FlowLayoutPanel areaBar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 64, WrapContents = false, AutoScroll = false, Padding = new Padding(0, 4, 0, 6) };
         readonly ListView list;
         readonly RichTextBox details = new RichTextBox { ReadOnly = true, BorderStyle = BorderStyle.None, Tag = "surface", DetectUrls = false, ScrollBars = RichTextBoxScrollBars.Vertical };
-        readonly Button btnScan, btnScanAdmin, btnSetup, btnFix, btnOpen, btnIgnore;
+        readonly Button btnScan, btnScanAdmin, btnSetup, btnFix, btnOpen, btnDefender, btnIgnore;
         readonly Label status = new Label { AutoSize = true, Padding = new Padding(6, 7, 0, 0), Tag = "muted" };
 
         public AuditForm(string check)
@@ -100,9 +100,10 @@ namespace DeadPixel
             list.SelectedIndexChanged += (s, e) => ShowDetails();
             btnFix = Ui.Btn("Виправити…", (s, e) => { var r = Selected; if (r != null) OpenSetup(r.Fix.Recipe); });
             btnOpen = Ui.Btn("Відкрити в Windows", (s, e) => { var r = Selected; if (r != null) TryOpen(r.Fix.Open); });
+            btnDefender = Ui.Btn("Перевірити Defender'ом", (s, e) => { var r = Selected; if (r != null) ScanFiles(r.Files); });
             btnIgnore = Ui.Btn("Ігнорувати", (s, e) => ToggleIgnore());
             var detailBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(0, 6, 0, 0), WrapContents = false };
-            detailBar.Controls.AddRange(new Control[] { btnFix, btnOpen, btnIgnore });
+            detailBar.Controls.AddRange(new Control[] { btnFix, btnOpen, btnDefender, btnIgnore });
             var right = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6, 0, 0, 0) };
             right.Controls.Add(Ui.Card(details, new Padding(12, 10, 8, 8)));
             right.Controls.Add(detailBar);
@@ -162,6 +163,7 @@ namespace DeadPixel
             foreach (var x in r.Results)
             {
                 if (x.Evidence == null) x.Evidence = new List<string>();
+                if (x.Files == null) x.Files = new List<string>();
                 if (x.Pros == null) x.Pros = new List<string>();
                 if (x.Cons == null) x.Cons = new List<string>();
                 if (x.Fix == null) x.Fix = new FixInfo();
@@ -303,9 +305,10 @@ namespace DeadPixel
             details.Clear();
             btnFix.Visible = r != null && !string.IsNullOrEmpty(r.Fix.Recipe);
             btnOpen.Visible = r != null && !string.IsNullOrEmpty(r.Fix.Open);
+            btnDefender.Visible = r != null && r.Files.Count > 0;
             btnIgnore.Visible = r != null && (r.IsIssue || r.Status == "info" || r.Ignored);
             if (r != null) btnIgnore.Text = r.Ignored ? "Не ігнорувати" : "Ігнорувати";
-            btnFix.Enabled = btnOpen.Enabled = btnIgnore.Enabled = !busy;
+            btnFix.Enabled = btnOpen.Enabled = btnDefender.Enabled = btnIgnore.Enabled = !busy;
             if (r == null)
             {
                 Add(report == null ? "Натисніть «Сканувати», щоб перевірити систему." : "Виберіть перевірку зліва.", theme.Muted, false, 10f);
@@ -328,6 +331,8 @@ namespace DeadPixel
                 fixLines.Insert(0, "«Виправити…» відкриє рецепт у Сетапі ПК: там видно, що саме зміниться, а поточні значення зберігаються для відкату.");
             if (!string.IsNullOrEmpty(r.Fix.Open))
                 fixLines.Add("«Відкрити в Windows» — відповідне вікно налаштувань.");
+            if (r.Files.Count > 0)
+                fixLines.Insert(0, "«Перевірити Defender'ом» — перевірка підозрілих файлів (" + r.Files.Count + "); нічого не видаляє, лише повідомляє результат.");
             if ((r.IsIssue || r.Status == "info") && fixLines.Count > 0) { Heading("Як виправити"); Bullets(fixLines, theme.Fg, "→  "); }
             details.SelectionStart = 0;
             details.ScrollToCaret();
@@ -429,6 +434,45 @@ namespace DeadPixel
             catch (Exception ex) { SetStatus(ex.Message, theme.Danger); }
         }
 
+        // Перевірка файлів Microsoft Defender без лікування (-DisableRemediation): аудит нічого не змінює сам.
+        // Код виходу MpCmdRun: 0 — загроз немає, 2 — знайдено загрозу, інше — помилка сканування
+        void ScanFiles(List<string> files)
+        {
+            var mp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Windows Defender\MpCmdRun.exe");
+            if (!File.Exists(mp)) { SetStatus("Microsoft Defender не знайдено (працює інший антивірус?) — перевірте файли ним.", theme.Warn); return; }
+            var list = files.Take(20).ToList();
+            RunAsync("Defender перевіряє файлів: " + list.Count + "…", () =>
+            {
+                var lines = new List<string>();
+                int threats = 0, errors = 0;
+                foreach (var f in list)
+                {
+                    if (!File.Exists(f)) { lines.Add("—  " + f + " (файлу вже немає)"); continue; }
+                    var psi = new ProcessStartInfo(mp, "-Scan -ScanType 3 -File \"" + f + "\" -DisableRemediation")
+                    { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8 };
+                    using (var p = Process.Start(psi))
+                    {
+                        var output = p.StandardOutput.ReadToEnd();
+                        p.WaitForExit();
+                        if (p.ExitCode == 0) lines.Add("✓  " + f);
+                        else if (p.ExitCode == 2) { threats++; lines.Add("✕  " + f + "  — ЗАГРОЗА: " + string.Join("; ", output.Split('\n').Where(l => l.IndexOf("Threat", StringComparison.OrdinalIgnoreCase) >= 0).Select(l => l.Trim()))); }
+                        else { errors++; lines.Add("?  " + f + "  — не вдалося перевірити (код " + p.ExitCode + ")"); }
+                    }
+                }
+                return new object[] { threats, errors, lines };
+            }, res =>
+            {
+                var a = (object[])res;
+                int threats = (int)a[0], errors = (int)a[1];
+                var lines = (List<string>)a[2];
+                if (threats > 0) SetStatus("Defender знайшов загроз: " + threats + ". Відкрийте «Безпека Windows», щоб видалити їх.", theme.Danger);
+                else if (errors > 0) SetStatus("Загроз не знайдено, але " + errors + " файл(и) перевірити не вдалося.", theme.Warn);
+                else SetStatus("Defender: загроз не знайдено (" + list.Count + " файл.). Підозра лишається, якщо ви не впізнаєте програму.", ModuleHost.Ok(theme));
+                MessageBox.Show(this, string.Join("\n", lines) + (threats > 0 ? "\n\nЗагрозу не видалено: зробіть це в «Безпека Windows» → «Захист від вірусів і загроз»." : ""),
+                    "DEADPIXEL — перевірка Defender'ом", MessageBoxButtons.OK, threats > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+            });
+        }
+
         void TryOpen(string what)
         {
             try { ModuleHost.Open(what); }
@@ -464,7 +508,7 @@ namespace DeadPixel
         void UpdateBusy()
         {
             btnScan.Enabled = btnScanAdmin.Enabled = !busy;
-            btnFix.Enabled = btnOpen.Enabled = btnIgnore.Enabled = !busy;
+            btnFix.Enabled = btnOpen.Enabled = btnDefender.Enabled = btnIgnore.Enabled = !busy;
             UseWaitCursor = busy;
         }
 

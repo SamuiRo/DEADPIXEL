@@ -46,18 +46,28 @@ function Get-DataDir {
     $dir
 }
 
+$script:IsAdmin = $null
 function Test-Admin {
-    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($null -eq $script:IsAdmin) {
+        $script:IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    $script:IsAdmin
 }
 
 # ---------------------------------------------------------------- для перевірок (checks\*.ps1)
 
 # Status: ok | issue | info | unknown | na.  Severity (для issue): critical | high | medium | low
+# Files - шляхи до файлів, які GUI може перевірити Defender'ом
 function Ok([string]$Value, [string]$Detail, [string[]]$Evidence) {
     @{ Status = 'ok'; Value = $Value; Detail = $Detail; Evidence = $Evidence }
 }
-function Issue([ValidateSet('critical', 'high', 'medium', 'low', 'info')][string]$Severity, [string]$Value, [string]$Detail, [string[]]$Evidence) {
-    @{ Status = $(if ($Severity -eq 'info') { 'info' } else { 'issue' }); Severity = $Severity; Value = $Value; Detail = $Detail; Evidence = $Evidence }
+function Issue([ValidateSet('critical', 'high', 'medium', 'low', 'info')][string]$Severity, [string]$Value, [string]$Detail, [string[]]$Evidence, [string[]]$Files) {
+    @{ Status = $(if ($Severity -eq 'info') { 'info' } else { 'issue' }); Severity = $Severity; Value = $Value; Detail = $Detail; Evidence = $Evidence; Files = $Files }
+}
+# Результат неповний без прав адміністратора (не видно чужих процесів, служб тощо) - GUI запропонує сканування з правами
+function Limited($r) {
+    if (-not (Test-Admin)) { $r.NeedsAdmin = $true }
+    $r
 }
 function Unknown([string]$Detail, [switch]$Admin) {
     @{ Status = 'unknown'; Value = '?'; Detail = $Detail; NeedsAdmin = [bool]$Admin }
@@ -84,6 +94,195 @@ function Get-OsInfo {
         IsHome = $cv.EditionID -match '^Core'
     }
     $script:OsInfo
+}
+
+# ---------------------------------------------------------------- процеси, файли, підписи (спільне для кількох областей)
+
+# PID → Win32_Process (Name, ExecutablePath, CommandLine, ParentProcessId). Без прав адміністратора
+# шлях і командний рядок видно лише для власних процесів
+$script:Procs = $null
+function Get-ProcessTable {
+    if (-not $script:Procs) {
+        $script:Procs = @{}
+        foreach ($p in Get-CimInstance Win32_Process) { $script:Procs[[int]$p.ProcessId] = $p }
+    }
+    $script:Procs
+}
+
+# Підписи кешуються між скануваннями (шлях + розмір + час зміни): Get-AuthenticodeSignature - найдовша операція аудиту
+$script:SigCache = $null
+$script:SigDirty = $false
+function Get-SigCachePath { Join-Path (Get-DataDir) 'sigcache.json' }
+function Get-FileSignature([string]$Path) {
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    if ($null -eq $script:SigCache) {
+        $script:SigCache = @{}
+        try {
+            $old = Get-Content (Get-SigCachePath) -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($p in $old.PSObject.Properties) { $script:SigCache[$p.Name] = $p.Value }
+        } catch { }
+    }
+    $fi = Get-Item -LiteralPath $Path -Force
+    $key = '{0}|{1}|{2}' -f $Path.ToLowerInvariant(), $fi.Length, $fi.LastWriteTimeUtc.Ticks
+    if ($script:SigCache.ContainsKey($key)) { return $script:SigCache[$key] }
+    $s = Get-AuthenticodeSignature -LiteralPath $Path
+    $r = [pscustomobject]@{
+        Status = [string]$s.Status
+        Signer = $(if ($s.SignerCertificate) { $s.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) } else { '' })
+    }
+    $script:SigCache[$key] = $r
+    $script:SigDirty = $true
+    $r
+}
+function Save-SigCache {
+    if (-not $script:SigDirty) { return }
+    # 3000 записів - з великим запасом на всі exe, що бувають у процесах і автозапуску
+    $keep = [ordered]@{}
+    foreach ($k in @($script:SigCache.Keys | Select-Object -Last 3000)) { $keep[$k] = $script:SigCache[$k] }
+    try { ConvertTo-Json -InputObject ([pscustomobject]$keep) -Depth 3 -Compress | Set-Content -Encoding UTF8 (Get-SigCachePath) } catch { }
+}
+
+# Наскільки підозріле місце, звідки запущено файл: туди може писати будь-яка програма користувача
+function Get-PathRisk([string]$Path) {
+    if (-not $Path) { return @{ Points = 0; Why = '' } }
+    $p = $Path.ToLowerInvariant()
+    $temp = [IO.Path]::GetTempPath().ToLowerInvariant()
+    if ($p.StartsWith($temp) -or $p -match '\\appdata\\local\\temp\\|\\downloads\\|\\\$recycle\.bin\\' -or ($env:PUBLIC -and $p.StartsWith($env:PUBLIC.ToLowerInvariant() + '\'))) {
+        return @{ Points = 2; Why = 'запущено з тимчасової папки або «Завантажень»' }
+    }
+    if ($p -match '^[a-z]:\\programdata\\[^\\]+$') { return @{ Points = 2; Why = 'файл лежить просто в корені ProgramData' } }
+    if ($p -match '\\appdata\\') { return @{ Points = 1; Why = 'папка профілю користувача (AppData)' } }
+    @{ Points = 0; Why = '' }
+}
+
+# Ознаки зловживання вбудованими інструментами Windows у командному рядку
+function Get-CommandRisk([string]$Cmd) {
+    $why = @(); $points = 0
+    if (-not $Cmd) { return @{ Points = 0; Why = $why } }
+    if ($Cmd -match '(?i)(powershell|pwsh)' -and $Cmd -match '(?i)(downloadstring|downloadfile|net\.webclient|invoke-webrequest|\biwr\b|start-bitstransfer).*(\biex\b|invoke-expression)|(\biex\b|invoke-expression).*(downloadstring|net\.webclient)') {
+        $points += 4; $why += 'PowerShell завантажує і одразу виконує код з інтернету'
+    } elseif ($Cmd -match '(?i)(powershell|pwsh).*\s-e(nc|ncodedcommand)?\s+[a-z0-9+/=]{20,}') {
+        $points += 3; $why += 'PowerShell із закодованою командою (так ховають, що виконується; буває і в легітимних інструментів)'
+    }
+    if ($Cmd -match '(?i)mshta(\.exe)?["\s]+(https?:|javascript:|vbscript:)') { $points += 4; $why += 'mshta виконує скрипт з інтернету' }
+    if ($Cmd -match '(?i)rundll32(\.exe)?["\s].*javascript:') { $points += 4; $why += 'rundll32 виконує JavaScript' }
+    if ($Cmd -match '(?i)regsvr32(\.exe)?.*\/i:\s*https?:|scrobj\.dll') { $points += 4; $why += 'regsvr32 завантажує скрипт (техніка Squiblydoo)' }
+    if ($Cmd -match '(?i)certutil(\.exe)?.*(-urlcache|-decode)') { $points += 3; $why += 'certutil завантажує або розкодовує файл' }
+    if ($Cmd -match '(?i)(wscript|cscript)(\.exe)?.*\\(appdata|temp|downloads|users\\public)\\.*\.(js|jse|vbs|vbe|wsf)') { $points += 3; $why += 'скрипт Windows Script Host з папки користувача' }
+    @{ Points = $points; Why = $why }
+}
+
+# Імена системних процесів, під які маскуються шкідливі програми
+$SystemNames = @('svchost', 'lsass', 'csrss', 'winlogon', 'services', 'smss', 'explorer', 'dllhost', 'rundll32', 'conhost',
+                 'taskhostw', 'spoolsv', 'wininit', 'dwm', 'sihost', 'ctfmon', 'runtimebroker', 'searchhost', 'taskmgr', 'msmpeng')
+
+# Відстань Левенштейна двома рядками таблиці (PowerShell 5.1 не розбирає вирази в індексах двовимірних масивів)
+function Get-EditDistance([string]$a, [string]$b) {
+    $prev = [int[]](0..$b.Length)
+    for ($i = 1; $i -le $a.Length; $i++) {
+        $cur = New-Object int[] ($b.Length + 1)
+        $cur[0] = $i
+        for ($j = 1; $j -le $b.Length; $j++) {
+            $cost = [int]($a[$i - 1] -ne $b[$j - 1])
+            $cur[$j] = [Math]::Min([Math]::Min($prev[$j] + 1, $cur[$j - 1] + 1), $prev[$j - 1] + $cost)
+        }
+        $prev = $cur
+    }
+    $prev[$b.Length]
+}
+
+# Шлях з процесу/служби/реєстру → звичайний: без \\?\ і лапок, зі змінними середовища
+function Get-CleanPath([string]$Path) {
+    if (-not $Path) { return $null }
+    $p = [Environment]::ExpandEnvironmentVariables($Path.Trim().Trim('"'))
+    if ($p.StartsWith('\\?\') -or $p.StartsWith('\??\')) { $p = $p.Substring(4) }
+    $p
+}
+
+$script:TypoCache = @{}
+function Get-Typosquat([string]$base) {
+    if (-not $script:TypoCache.ContainsKey($base)) {
+        $hit = $null
+        if ($base.Length -ge 6 -and $SystemNames -notcontains $base) {
+            foreach ($s in $SystemNames) {
+                if ($s.Length -ge 6 -and [Math]::Abs($s.Length - $base.Length) -le 1 -and (Get-EditDistance $base $s) -eq 1) { $hit = $s; break }
+            }
+        }
+        $script:TypoCache[$base] = $hit
+    }
+    $script:TypoCache[$base]
+}
+
+# Оцінка самого файлу (місце, маскування, підпис) - одна на шлях: у системі десятки однакових процесів
+$script:FileRisk = @{}
+function Measure-File([string]$Path, [string]$base) {
+    $points = 0; $why = @()
+    $loc = Get-PathRisk $Path
+    if ($loc.Points) { $points += $loc.Points; $why += $loc.Why }
+    $inWindows = $Path -and $Path.ToLowerInvariant().StartsWith($env:windir.ToLowerInvariant() + '\')
+    $sig = $null
+    if ($base -and $Path -and -not $inWindows -and $SystemNames -contains $base) {
+        # Справжні компоненти Windows бувають і поза папкою Windows (Defender - у ProgramData): вирішує підпис Microsoft
+        $sig = Get-FileSignature $Path
+        if (-not ($sig -and $sig.Status -eq 'Valid' -and $sig.Signer -match 'Microsoft')) {
+            $points += 5; $why += "ім'я системного процесу Windows, але файл не в папці Windows і не підписаний Microsoft"
+        }
+    } else {
+        $typo = Get-Typosquat $base
+        if ($typo) { $points += 4; $why += "ім'я майже як у системного «$typo» - типове маскування" }
+    }
+    # Підпис перевіряємо лише в підозрілих місцях: у Windows/Program Files він майже завжди є, а перевірка коштує часу
+    if ($Path -and -not $sig -and ($loc.Points -gt 0 -or $points -gt 0)) { $sig = Get-FileSignature $Path }
+    if ($sig -and $loc.Points -gt 0) {
+        if ($sig.Status -eq 'NotSigned') { $points += $(if ($loc.Points -ge 2) { 2 } else { 1 }); $why += 'файл не має цифрового підпису' }
+        elseif ($sig.Status -notin 'Valid', 'NotSigned', 'UnknownError') { $points += 4; $why += "підпис недійсний ($($sig.Status)) - файл могли змінити" }
+    }
+    @{ Points = $points; Why = $why; Signature = $sig }
+}
+
+# Загальна оцінка виконуваного файлу: місце + підпис + маскування під системний + командний рядок
+function Measure-Executable([string]$Path, [string]$Cmd, [string]$Name) {
+    $Path = Get-CleanPath $Path
+    $base = if ($Name) { [IO.Path]::GetFileNameWithoutExtension($Name).ToLowerInvariant() } elseif ($Path) { [IO.Path]::GetFileNameWithoutExtension($Path).ToLowerInvariant() } else { '' }
+    $key = "$Path|$base"
+    if (-not $script:FileRisk.ContainsKey($key)) { $script:FileRisk[$key] = Measure-File $Path $base }
+    $f = $script:FileRisk[$key]
+    $c = Get-CommandRisk $Cmd
+    # Новий об'єкт: перевірки додають до нього власні причини
+    @{ Points = $f.Points + $c.Points; Why = @($f.Why) + @($c.Why); Signature = $f.Signature }
+}
+
+function Get-RiskSeverity([int]$Points) { if ($Points -ge 5) { 'high' } elseif ($Points -ge 3) { 'medium' } else { $null } }
+
+# Шлях до exe з командного рядка автозапуску / служби / завдання
+function Get-ExeFromCommand([string]$Cmd) {
+    if (-not $Cmd) { return $null }
+    $c = [Environment]::ExpandEnvironmentVariables($Cmd.Trim())
+    if ($c.StartsWith('"')) { $end = $c.IndexOf('"', 1); if ($end -gt 1) { return Get-CleanPath $c.Substring(1, $end - 1) } }
+    $m = [regex]::Match($c, '(?i)^.+?\.(exe|com|bat|cmd|scr|pif)(?=\s|$)')
+    if ($m.Success) { return Get-CleanPath $m.Value }
+    Get-CleanPath ($c -split '\s+')[0]
+}
+
+# Чи може звичайна програма користувача змінити файл / створити файл у папці. Для файлу, що запускається
+# з правами SYSTEM, це шлях до підвищення прав: підмінити сам exe або підкласти DLL поруч
+$script:WritableCache = @{}
+function Test-WritableByUsers([string]$Dir) {
+    if (-not $Dir -or -not (Test-Path -LiteralPath $Dir)) { return $false }
+    $k = $Dir.ToLowerInvariant()
+    if ($script:WritableCache.ContainsKey($k)) { return $script:WritableCache[$k] }
+    $sids = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-4', [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+    # Для папки WriteData = «створювати файли»; AppendData = лише «створювати підпапки» (так у Users на C:\) - файл ним не підкласти
+    $write = [Security.AccessControl.FileSystemRights]'WriteData, ChangePermissions, TakeOwnership'
+    $res = $false
+    try {
+        foreach ($rule in (Get-Acl -LiteralPath $Dir).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+            if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) { continue }   # стосується лише вкладених
+            if ($rule.AccessControlType -eq 'Allow' -and $sids -contains $rule.IdentityReference.Value -and ($rule.FileSystemRights -band $write)) { $res = $true; break }
+        }
+    } catch { }
+    $script:WritableCache[$k] = $res
+    $res
 }
 
 # Ноутбук/планшет: від цього залежить, наскільки важливе шифрування диска
@@ -116,7 +315,7 @@ function Invoke-Check($area, $c, [bool]$admin) {
     [pscustomobject]@{
         Id = $c.Id; Area = $area.Id; Title = $c.Title
         Status = $r.Status; Severity = [string]$r.Severity; Value = [string]$r.Value; Detail = [string]$r.Detail
-        Evidence = @($r.Evidence | Where-Object { $_ })
+        Evidence = @($r.Evidence | Where-Object { $_ }); Files = @($r.Files | Where-Object { $_ } | Select-Object -Unique)
         NeedsAdmin = [bool]$r.NeedsAdmin; Ignored = $false
         Explain = [string]$c.Explain; Pros = @($c.Pros | Where-Object { $_ }); Cons = @($c.Cons | Where-Object { $_ })
         Fix = [pscustomobject]@{
@@ -181,6 +380,7 @@ function Invoke-Audit {
     $results = foreach ($a in $areas) {
         foreach ($c in $a.Checks) { if (Test-Match $c.Id $Check) { Invoke-Check $a $c $admin } }
     }
+    Save-SigCache
     New-Report $areas @($results) $admin (Get-Date).ToString('s')
 }
 
