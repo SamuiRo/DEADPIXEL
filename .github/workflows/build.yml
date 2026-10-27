@@ -18,9 +18,12 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        shell: powershell   # Windows PowerShell 5.1 — саме в ній працюють скрипти у користувачів
+        # Windows PowerShell 5.1 — саме в ній працюють скрипти у користувачів.
+        # Вбудовані кроки GitHub зберігає як UTF-8 без BOM, а 5.1 читає їх як ANSI: у run: лише ASCII,
+        # український текст — у файлах .ps1 з BOM.
+        shell: powershell
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check PowerShell syntax
         run: |
@@ -36,7 +39,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           $version = (Get-Content VERSION -TotalCount 1).Trim()
-          if ("v$version" -ne $env:GITHUB_REF_NAME) { Write-Host "::error::Тег $env:GITHUB_REF_NAME не збігається з VERSION ($version)"; exit 1 }
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { Write-Host "::error::Tag $env:GITHUB_REF_NAME does not match VERSION ($version)"; exit 1 }
 
       - name: Install Inno Setup
         run: |
@@ -45,7 +48,7 @@ jobs:
       - name: Build and package
         run: .\tools\Package.ps1 -RequireInstaller
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: DEADPIXEL-${{ github.sha }}
           path: |
@@ -62,8 +65,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4   # gh визначає репозиторій за git remote
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5   # gh визначає репозиторій за git remote
+      - uses: actions/download-artifact@v5
         with:
           name: DEADPIXEL-${{ github.sha }}
           path: dist
