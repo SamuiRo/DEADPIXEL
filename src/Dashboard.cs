@@ -49,7 +49,7 @@ namespace DeadPixel
         public Dashboard(TrayApp app)
         {
             this.app = app;
-            Text = "DEADPIXEL";
+            Text = "DEADPIXEL " + Program.Version;
             Font = new Font("Segoe UI", 9f);
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;

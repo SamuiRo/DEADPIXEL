@@ -13,6 +13,7 @@ namespace DeadPixel
     {
         public static string BaseDir = AppDomain.CurrentDomain.BaseDirectory;
         public static string DataDir = Path.Combine(BaseDir, "data");
+        public static readonly string Version = typeof(Program).Assembly.GetName().Version.ToString(3); // з файлу VERSION (build.cmd)
 
         // Дані поруч з exe; якщо туди писати не можна (напр. Program Files) — у %LOCALAPPDATA%\DeadPixel
         static void ResolveDataDir()

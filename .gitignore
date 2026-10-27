@@ -19,3 +19,7 @@ desktop.ini
 .vs/
 .vscode/
 *.user
+
+# Проміжні файли збірки та пакети релізу (tools/Package.ps1)
+obj/
+dist/

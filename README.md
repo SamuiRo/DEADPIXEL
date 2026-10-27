@@ -105,6 +105,21 @@ build.cmd
 **Ярлики** — «Налаштування → Ярлик на робочому столі / у меню «Пуск»» або `DeadPixel.exe --shortcuts` (обидва одразу).
 Ярлик відкриває панель; якщо DEADPIXEL уже працює, повторний запуск лише показує її в наявному екземплярі.
 
+## Релізи
+
+Готові збірки — на сторінці [Releases](https://github.com/SamuiRo/DEADPIXEL/releases): інсталятор `DEADPIXEL-X.Y.Z-setup.exe`
+(для поточного користувача, без прав адміністратора) або `DEADPIXEL-X.Y.Z-portable.zip`.
+
+Як випустити нову версію:
+1. Змінити номер у `VERSION` і описати зміни в `CHANGELOG.md` у розділі `## [X.Y.Z] - дата`.
+2. Закомітити, поставити тег і відправити: `git tag vX.Y.Z` → `git push origin master --tags`.
+3. GitHub Actions (`.github/workflows/build.yml`) збере exe, інсталятор, zip, `SHA256SUMS.txt` і опублікує реліз
+   з текстом із `CHANGELOG.md`. Якщо тег не збігається з `VERSION`, реліз не створиться.
+
+Той самий пакет локально: `powershell -NoProfile -File tools\Package.ps1` → `dist\`
+(інсталятор — лише якщо встановлено [Inno Setup 6](https://jrsoftware.org/isinfo.php), інакше тільки zip).
+Кожен коміт у `master` і кожен PR GitHub теж збирає й перевіряє синтаксис скриптів.
+
 ## Вимоги
 
 - Windows 10 1607+ або Windows 11 (.NET Framework 4.6+ вже є в системі).

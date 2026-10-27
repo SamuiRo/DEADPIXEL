@@ -6,3 +6,4 @@
 *.manifest text eol=crlf
 *.md       text eol=crlf
 *.exe      binary
+*.iss      text eol=crlf
