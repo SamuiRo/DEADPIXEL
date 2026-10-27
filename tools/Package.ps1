@@ -28,7 +28,7 @@ if (-not $SkipBuild) {
 # Лише те, що потрібно для роботи: без вихідного коду, assets і, головне, без data\ і reports\ (особисті дані)
 if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
 New-Item -ItemType Directory $stage | Out-Null
-foreach ($f in 'DeadPixel.exe', 'DeadPixel.ps1', 'DeadPixel.cmd', 'README.md', 'CHANGELOG.md', 'LICENSE', 'VERSION') {
+foreach ($f in 'DeadPixel.exe', 'DeadPixel.ps1', 'DeadPixel.cmd', 'README.md', 'README.uk.md', 'CHANGELOG.md', 'LICENSE', 'VERSION') {
     Copy-Item (Join-Path $root $f) $stage
 }
 Get-ChildItem (Join-Path $root 'modules') -Recurse -File | Where-Object {

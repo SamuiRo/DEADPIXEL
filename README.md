@@ -1,208 +1,219 @@
 # DEADPIXEL
 
-Діагностика аварійних перезавантажень, зависань відеодрайвера та проблем із дисками в Windows 10/11.
+[Українська](README.uk.md) · **English**
 
-## Що входить
+Diagnostics for crash restarts, graphics driver hangs and disk problems on Windows 10/11 — plus a security and
+health audit and recipe-based PC setup.
 
-| Файл | Призначення |
+## What's inside
+
+| File | Purpose |
 |---|---|
-| `DeadPixel.exe` | Трей-програма з панеллю: живі показники GPU/CPU, «чорна скринька», краші з таймлайном, аналіз дампів (WinDbg), закономірності, історія змін драйверів/оновлень, диски (SMART, детектор зависань), процеси, пакет для діагностики |
-| `DeadPixel.ps1` / `DeadPixel.cmd` | Разовий HTML/TXT-звіт за N днів (`DeadPixel.cmd -Days 60`) |
-| `src/` | Вихідний код трей-програми (C# 5, .NET Framework 4.5+) |
-| `build.cmd` | Збірка `DeadPixel.exe` і GUI модулів компілятором, що є в Windows — без Visual Studio і SDK |
-| `modules/` | Модулі на вимогу — окремі процеси, які трей лише запускає (див. нижче) |
+| `DeadPixel.exe` | Tray app with a panel: live GPU/CPU readings, a "black box", crashes with a timeline, dump analysis (WinDbg), patterns, driver/update change history, disks (SMART, stall detector), processes, a diagnostics bundle |
+| `DeadPixel.ps1` / `DeadPixel.cmd` | One-off HTML/TXT report for the last N days (`DeadPixel.cmd -Days 60`) |
+| `src/` | Tray app source code (C# 5, .NET Framework 4.5+) |
+| `build.cmd` | Builds `DeadPixel.exe` and the module GUIs with the compiler that ships with Windows — no Visual Studio or SDK |
+| `modules/` | On-demand modules — separate processes the tray only launches (see below) |
 
-## Модулі
+## Modules
 
-Важке або разове не живе в трей-програмі постійно: кожен модуль — окрема програма/скрипт у `modules/<назва>/`,
-яку запускає пункт меню трея (`TrayApp.RunModule`) або яку можна запустити напряму.
+Heavy or one-off work does not live in the tray app permanently: each module is a separate program/script in
+`modules/<name>/`, launched from a tray menu item (`TrayApp.RunModule`) or directly.
 
-### Audit — перевірка безпеки і стану системи
+### Audit — security and system health check
 
-**GUI** — `modules/audit/AuditGui.exe` (пункт трея «Аудит системи…»): загальна оцінка 0–100, картки областей,
-список перевірок від найнебезпечнішої, а для вибраної — що це, плюси, мінуси, докази і що зробити.
-«Виправити…» відкриває відповідний рецепт Setup (там видно зміни і є відкат), «Відкрити в Windows» — потрібне вікно
-налаштувань, «Перевірити Defender'ом» — перевірка підозрілих файлів (без видалення), «Ігнорувати» — свідомий вибір,
-який більше не рахується в оцінці.
+**GUI** — `modules/audit/AuditGui.exe` (tray item "System audit…"): an overall score 0–100, area cards, the list of checks
+from most to least dangerous, and for the selected one — what it is, pros, cons, evidence and what to do.
+"Fix…" opens the matching Setup recipe (where changes are visible and can be reverted), "Open in Windows" opens the right
+settings window, "Scan with Defender" checks suspicious files (without deleting), "Ignore" is a deliberate choice that no
+longer counts toward the score.
 
-Області: захист платформи, захист Windows, облікові записи, мережа (хто приймає з'єднання і чи пропускає брандмауер),
-процеси й автозапуск (підозрілі процеси, автозавантаження, Планувальник, служби з файлами, які може замінити будь-яка
-програма, IFEO, WMI), програми й драйвери (застарілі версії через winget, програми без підтримки, драйвери),
-стан системи (місце, диски, перезавантаження, точки відновлення), хвости програм (служби, завдання, драйвери, PATH,
-брандмауер, автозапуск, контекстне меню, записи «Програм», папки без програми, старі драйвери в сховищі).
+Areas: platform protection, Windows protection, accounts, network (who accepts connections and whether the firewall lets
+them through), processes and startup (suspicious processes, Startup, Task Scheduler, services whose files any program can
+replace, IFEO, WMI), programs and drivers (outdated versions via winget, unsupported programs, drivers), system health
+(free space, disks, restarts, restore points), program leftovers (services, tasks, drivers, PATH, firewall, startup,
+context menu, installed-program entries, folders with no program, old drivers in the driver store).
 
-**Прибирання хвостів — лише через карантин.** Аудит нічого не видаляє: «Прибрати…» передає вибране рушію Setup
-(`Setup.ps1 -Cleanup`, з UAC). Перед кожною дією рушій ще раз перевіряє, що ціль досі «хвіст» і лежить у дозволеному
-місці, а тоді переносить її в `data\quarantine\<дата>`: файли й папки — фізично, розділи реєстру й служби — в .reg,
-завдання — в XML, правила брандмауера — з усіма параметрами. «Карантин…» (або `Setup.ps1 -Quarantine`,
-`-Restore <сесія>`) повертає все на місце; `-Purge <сесія>` видаляє остаточно, але не раніше ніж через 30 днів.
-Ніколи не чіпає: папку Windows, корені Program Files/ProgramData/AppData, папки Microsoft і працюючих програм,
-розділи реєстру поза записами «Програм» і обробниками контекстного меню, завдання з `\Microsoft\`.
+**Leftover cleanup goes through quarantine only.** The audit deletes nothing: "Clean up…" hands the selection to the Setup
+engine (`Setup.ps1 -Cleanup`, with UAC). Before each action the engine re-checks that the target is still a leftover and
+lies in an allowed place, then moves it to `data\quarantine\<date>`: files and folders physically, registry keys and
+services as .reg, tasks as XML, firewall rules with all their parameters. "Quarantine…" (or `Setup.ps1 -Quarantine`,
+`-Restore <session>`) puts everything back; `-Purge <session>` deletes for good, but not earlier than 30 days later.
+Never touched: the Windows folder, the roots of Program Files/ProgramData/AppData, Microsoft folders and folders of running
+programs, registry keys outside installed-program entries and context menu handlers, tasks under `\Microsoft\`.
 
-**Розклад** — «Розклад…»: завдання Планувальника `\DEADPIXEL\DEADPIXEL Audit` запускає `AuditGui.exe --background`
-раз на N днів (без вікон, низький пріоритет, з правами адміністратора — тому налаштування потребує UAC).
-Трей раз на хвилину дивиться `data\audit\summary.ini` і повідомляє лише про **нові** критичні й високі проблеми;
-клік відкриває аудит на цій перевірці. Вимкнути — «Налаштування → Сповіщення» в панелі.
-**«Звіт HTML»** зберігає сторінку в `reports\` — вона містить відомості про ПК, показуйте її лише тим, кому довіряєте.
-**winget** (перевірка оновлень програм) звертається до каталогу Microsoft в інтернеті; решта аудиту працює офлайн.
+**Schedule** — "Schedule…": the scheduled task `\DEADPIXEL\DEADPIXEL Audit` runs `AuditGui.exe --background` every N days
+(no windows, low priority, with standard user rights — the exe lives in a user-writable folder, so running it elevated on a
+schedule would be a hole). Creating the task asks for UAC once; without admin rights other users' processes and WMI
+subscriptions are not visible, so those checks are marked as limited.
+The tray looks at `data\audit\summary.ini` once a minute and notifies only about **new** critical and high findings;
+clicking opens the audit on that check. Turn it off in the panel: "Settings → Notifications".
+**"HTML report"** saves a page to `reports\` — it contains details about the PC, show it only to people you trust.
+**winget** (program update check) queries the Microsoft catalog online; the rest of the audit works offline.
 
-**Аудит нічого не змінює** — він лише читає систему. Більшість перевірок працює без прав адміністратора;
-без них не видно чужих і системних процесів та підписок WMI — тоді з'являється «Сканувати з правами».
-Сканування займає кілька секунд. Звіти — у `data\audit\` (`latest.json`, `history\`, `ignore.json`;
-`sigcache.json` — кеш перевірених цифрових підписів, щоб повторні сканування були швидкими).
+**The audit changes nothing** — it only reads the system. Most checks run without admin rights; without them other users'
+and system processes and WMI subscriptions are not visible — then "Scan as administrator" appears.
+A scan takes a few seconds. Reports are in `data\audit\` (`latest.json`, `history\`, `ignore.json`;
+`sigcache.json` caches verified digital signatures so repeat scans are fast).
 
-**Консоль** — `modules/audit/Audit.cmd` (з правами, зберігає звіт) або напряму:
+**Console** — `modules/audit/Audit.cmd` (elevated, saves the report) or directly:
 
 ```bat
-powershell -File Audit.ps1                      :: усі перевірки; код виходу = кількість критичних і високих
-powershell -File Audit.ps1 -Area platform       :: одна область (platform, windows, accounts, network, processes, software, health, leftovers)
-powershell -File Audit.ps1 -Html report.html    :: останній звіт як HTML
-powershell -File Audit.ps1 -Schedule 3          :: автоматично раз на 3 дні (з правами адміністратора); 0 — вимкнути
-powershell -File Audit.ps1 -Check hvci,uac      :: окремі перевірки
-powershell -File Audit.ps1 -Save                :: зберегти як останній звіт (лише повне сканування)
-powershell -File Audit.ps1 -Ignore guest        :: не рахувати знахідку; -Unignore повертає
+powershell -File Audit.ps1                      :: all checks; exit code = number of critical and high findings
+powershell -File Audit.ps1 -Area platform       :: one area (platform, windows, accounts, network, processes, software, health, leftovers)
+powershell -File Audit.ps1 -Html report.html    :: the latest report as HTML
+powershell -File Audit.ps1 -Schedule 3          :: automatically every 3 days; 0 turns it off
+powershell -File Audit.ps1 -Check hvci,uac      :: specific checks
+powershell -File Audit.ps1 -Save                :: save as the latest report (full scan only)
+powershell -File Audit.ps1 -Ignore guest        :: stop counting a finding; -Unignore brings it back
+powershell -File Audit.ps1 -Lang en             :: output language (uk / en; default from settings)
 ```
 
-**Нова перевірка** — запис у `modules/audit/checks/<область>.ps1` (UTF-8 з BOM):
+**A new check** — an entry in `modules/audit/checks/<area>.ps1` (UTF-8 with BOM):
 
-| Поле | Що це |
+| Field | Meaning |
 |---|---|
-| `Id`, `Title` | ідентифікатор (для ігнорування) і назва |
-| `Test` | скриптблок; повертає `Ok 'значення'`, `Issue <critical\|high\|medium\|low\|info> 'значення' 'пояснення' @(докази) @(файли)`, `Unknown '…'` або `NotApplicable '…'`; `Limited (…)` — результат неповний без прав адміністратора. Файли з п'ятого аргументу GUI пропонує перевірити Defender'ом |
-| `Explain`, `Pros`, `Cons` | що це простою мовою; плюси і мінуси увімкнення |
-| `Fix` | `@{ Recipe = 'рецепт Setup'; Open = 'ms-settings:…'; Steps = @('вручну…') }` |
-| `Admin` | `$true` — без прав адміністратора перевірка не запускається |
-| `Prepare` | необов'язковий скриптблок, що запускається до всіх `Test` — почати довгу роботу паралельно (як winget) |
+| `Id`, `Title` | identifier (used for ignoring) and title |
+| `Test` | scriptblock; returns `Ok 'value'`, `Issue <critical\|high\|medium\|low\|info> 'value' 'explanation' @(evidence) @(files)`, `Unknown '…'` or `NotApplicable '…'`; `Limited (…)` marks a result as incomplete without admin rights. The GUI offers to scan the files from the fifth argument with Defender |
+| `Explain`, `Pros`, `Cons` | what it is in plain words; pros and cons of turning it on |
+| `Fix` | `@{ Recipe = 'Setup recipe'; Open = 'ms-settings:…'; Steps = @('manually…') }` |
+| `Admin` | `$true` — the check does not run without admin rights |
+| `Prepare` | optional scriptblock run before all `Test` blocks — to start long work in parallel (like winget) |
 
-Оцінка: кожна знахідка забирає відсоток від того, що лишилося: критична 40% (і оцінка не вище 39), висока 15%
-(не вище 79), середня 6%, низька 2%; «інфо» й ігноровані не рахуються. Так оцінка не падає лише через те, що перевірок стало більше.
+User-facing text is written as a pair: `(T 'українською' 'in English')`.
 
-### Setup — налаштування ПК за рецептами
+Score: each finding takes a percentage of what is left: critical 40% (and the score is capped at 39), high 15%
+(capped at 79), medium 6%, low 2%; "info" and ignored findings do not count. This way the score does not drop just because
+more checks were added.
 
-**Рецепт** — група налаштувань під конкретну задачу, яку можна **перевірити**, **застосувати** або **відкотити**.
-**Профіль** — набір рецептів під ширшу задачу (`new-pc`, `stability`) плюс кроки, які не автоматизуються.
+### Setup — recipe-based PC setup
 
-**Сценарій** — покрокова інструкція у вкладці рецепта («Увімкнути ping», «ASPM у BIOS»): ручні дії, команди з кнопкою ▶,
-умови «якщо попередня команда вдалася / не вдалася», параметри, перезавантаження.
+A **recipe** is a group of settings for a specific task that can be **checked**, **applied** or **reverted**.
+A **profile** is a set of recipes for a broader goal (`new-pc`, `stability`) plus steps that cannot be automated.
 
-**GUI** — `modules/setup/SetupGui.exe` (пункт трея «Сетап ПК»). Зліва профілі й рецепти з кольором стану, справа — вкладки:
-- **Рекомендовані** — що зараз і що треба, підказка до кожного налаштування, кнопки «Перевірити / Застосувати / Відкотити»,
-  ручні кроки. Перевірка йде з правами користувача; UAC запитується лише на «Застосувати» / «Відкотити».
-- **Сценарії** — картки кроків зі станом (○ ✓ ✕ –), виводом команд і поясненням «Чому це?»; «Виконати все» йде по кроках
-  і зупиняється на ручній дії, перезавантаженні або помилці без запасної гілки. Якщо кроку потрібні права адміністратора,
-  вгорі з'являється «Перезапустити з правами» — один UAC на всю сесію.
-- **Прогрес** сценаріїв (стани, вивід, параметри) — у `data\setup\progress.json`. Крок-перезавантаження зберігає прогрес,
-  додає одноразовий запуск GUI після входу (HKCU `RunOnce`) і перезавантажує ПК (або одразу в BIOS/UEFI);
-  після старту вікно відкривається на наступному кроці. Перезавантаження після натискання зараховується автоматично.
+A **scenario** is a step-by-step guide in a recipe tab ("Enable ping", "ASPM in BIOS"): manual actions, commands with a ▶
+button, "if the previous command succeeded / failed" conditions, parameters, restarts.
 
-**Консоль** — `modules/setup/Setup.cmd` (без аргументів — меню):
+**GUI** — `modules/setup/SetupGui.exe` (tray item "PC setup…"). Profiles and recipes with a state color on the left, tabs on
+the right:
+- **Recommended** — current vs desired value, a hint for every setting, "Check / Apply / Revert" buttons, manual steps.
+  Checking runs with user rights; UAC is requested only for "Apply" / "Revert".
+- **Scenarios** — step cards with a state (○ ✓ ✕ –), command output and a "Why?" explanation; "Run all" goes step by step
+  and stops at a manual action, a restart, or an error with no fallback branch. If a step needs admin rights,
+  "Restart as administrator" appears at the top — one UAC for the whole session.
+- Scenario **progress** (states, output, parameters) is kept in `data\setup\progress.json`. A restart step saves progress,
+  adds a one-time GUI launch after sign-in (HKCU `RunOnce`) and restarts the PC (or straight into BIOS/UEFI);
+  after startup the window opens on the next step. A restart is counted as done automatically once triggered.
+
+**Console** — `modules/setup/Setup.cmd` (no arguments shows a menu):
 
 ```bat
 Setup.cmd -List
-Setup.cmd -Recipe disk-power            :: перевірка, нічого не змінює
-Setup.cmd -Recipe disk-power -Apply     :: старі значення зберігаються в data\setup\ перед зміною
-Setup.cmd -Recipe disk-power -Revert    :: повертає саме ті значення, що були до -Apply
-Setup.cmd -ProfileName new-pc -Apply    :: усі рецепти профілю
-Setup.cmd -Recipe *                     :: аудит ПК за всіма рецептами
+Setup.cmd -Recipe disk-power            :: check only, changes nothing
+Setup.cmd -Recipe disk-power -Apply     :: old values are saved in data\setup\ before the change
+Setup.cmd -Recipe disk-power -Revert    :: restores exactly the values from before -Apply
+Setup.cmd -ProfileName new-pc -Apply    :: all recipes of a profile
+Setup.cmd -Recipe *                     :: audit the PC against all recipes
 ```
 
-Код виходу перевірки = кількість відхилень (0 — усе як треба, 255 — помилка запуску), тож аудит нового ПК можна скриптувати.
-GUI викликає той самий `Setup.ps1` з `-OutFile <json>`: уся логіка в одному місці, GUI лише показує результат.
+The check exit code = the number of deviations (0 — all as desired, 255 — launch error), so a new PC audit can be scripted.
+The GUI calls the same `Setup.ps1` with `-OutFile <json>`: all logic lives in one place, the GUI only shows the result.
 
-**Новий рецепт** — файл `modules/setup/recipes/<назва>.ps1` (UTF-8 з BOM), що повертає хеш-таблицю:
+**A new recipe** — a file `modules/setup/recipes/<name>.ps1` (UTF-8 with BOM) returning a hashtable:
 
-| Поле | Що це |
+| Field | Meaning |
 |---|---|
-| `Title`, `Description` | назва й опис для списку |
-| `Items` | налаштування (типи нижче) |
-| `Steps` | кроки на вкладці «Рекомендовані» (формат кроку нижче) |
-| `Reboot` | `$true`, якщо після застосування потрібне перезавантаження |
-| `Tabs` | сценарії: `@{ Id; Title; Description; Params; Steps }` |
+| `Title`, `Description` | title and description for the list |
+| `Items` | settings (types below) |
+| `Steps` | steps on the "Recommended" tab (step format below) |
+| `Reboot` | `$true` if a restart is needed after applying |
+| `Tabs` | scenarios: `@{ Id; Title; Description; Params; Steps }` |
 
-Крок — рядок (ручна дія) або хеш-таблиця:
+A step is a string (manual action) or a hashtable:
 
-| Поле | Що робить |
+| Field | What it does |
 |---|---|
-| `Text`, `Hint` | що зробити; пояснення «Чому це?» |
-| `Run` | команда PowerShell для кнопки ▶; вивід показується під кроком |
-| `Expect` | regex: крок успішний, лише якщо вивід йому відповідає (інакше рахується лише код виходу / помилки) |
-| `If` | `'ok'` / `'fail'` — крок діє, лише якщо попередня команда вдалася / не вдалася; інакше пропускається |
-| `Open` | що відкрити кнопкою «Відкрити ↗» (`devmgmt.msc`, `ms-settings:…`, `control.exe /name …`) |
-| `Reboot` | `'restart'` або `'firmware'` (одразу в BIOS/UEFI) |
-| `Admin` | `$true` — команді потрібні права адміністратора |
-| `Confirm` | текст підтвердження перед запуском |
+| `Text`, `Hint` | what to do; the "Why?" explanation |
+| `Run` | PowerShell command for the ▶ button; output is shown under the step |
+| `Expect` | regex: the step succeeds only if the output matches (otherwise only the exit code / errors count) |
+| `If` | `'ok'` / `'fail'` — the step applies only if the previous command succeeded / failed; otherwise it is skipped |
+| `Open` | what the "Open ↗" button opens (`devmgmt.msc`, `ms-settings:…`, `control.exe /name …`) |
+| `Reboot` | `'restart'` or `'firmware'` (straight into BIOS/UEFI) |
+| `Admin` | `$true` — the command needs admin rights |
+| `Confirm` | confirmation text before running |
 
-Параметри сценарію: `Params = @(@{ Name = 'IP'; Title = '…'; Default = '…'; Pattern = 'regex'; Hint = '…' })`.
-У `Text` і `Run` пишіть `{IP}`: у команду значення підставляється як рядок у лапках, тож його не можна «виконати».
+Scenario parameters: `Params = @(@{ Name = 'IP'; Title = '…'; Default = '…'; Pattern = 'regex'; Hint = '…' })`.
+Write `{IP}` in `Text` and `Run`: the value is substituted into the command as a quoted string, so it cannot be "executed".
 
-Типи пунктів (`Kind`):
+Item types (`Kind`):
 
-| Kind | Поля | Значення |
+| Kind | Fields | Value |
 |---|---|---|
-| `Power` | `Sub`, `Setting` (аліас або GUID), `Power` = `AC`/`DC` | індекс/число в поточній схемі живлення |
-| `FirewallRule` | `Name` — **не** `DisplayName`, він локалізований | `'True'` / `'False'` |
-| `Registry` | `Path`, `Name`, `Type` (типово `DWord`) | дані або `'<absent>'` (відкат видалить значення) |
-| `Custom` | `Get = { ... }`, `Set = { param($value) ... }` | будь-яке, що серіалізується в JSON |
+| `Power` | `Sub`, `Setting` (alias or GUID), `Power` = `AC`/`DC` | index/number in the active power plan |
+| `FirewallRule` | `Name` — **not** `DisplayName`, which is localized | `'True'` / `'False'` |
+| `Registry` | `Path`, `Name`, `Type` (default `DWord`) | data or `'<absent>'` (revert deletes the value) |
+| `Custom` | `Get = { ... }`, `Set = { param($value) ... }` | anything that serializes to JSON |
 
-Кожен пункт має `Id` (за ним зіставляється бекап), `Title`, `Desired`, `Hint` (пояснення в GUI) і за бажанням
-`Labels = @{ 0 = '…' }` для виводу значень.
+Each item has an `Id` (the backup is matched by it), `Title`, `Desired`, `Hint` (explanation in the GUI) and optionally
+`Labels = @{ 0 = '…' }` for displaying values.
 
-**Новий профіль** — `modules/setup/profiles/<назва>.ps1`: `@{ Title; Description; Recipes = @('…'); Steps }`.
-Приклади — у `recipes/` і `profiles/`.
+**A new profile** — `modules/setup/profiles/<name>.ps1`: `@{ Title; Description; Recipes = @('…'); Steps }`.
+Examples are in `recipes/` and `profiles/`.
 
-## Збірка
+## Language
+
+The UI, audit, Setup recipes, reports and installer are available in Ukrainian and English.
+"Settings → Language": **System** (Ukrainian if Windows is in Ukrainian, otherwise English), **Українська**, **English**;
+after a change the app offers to restart. The value is stored in `data\settings.ini` (`Language=system|uk|en`).
+Scripts read it from there too, or take `-Lang uk|en` (`Audit.ps1 -Lang en`, `Setup.ps1 -Lang en`, `DeadPixel.ps1 -Lang en`).
+New script text is written as a pair: `T 'українською' 'in English'` (`modules/common/Lang.ps1`); in C# — `L.T("…", "…")`.
+
+## Building
 
 ```bat
 build.cmd
 ```
 
-Іконка «Вибитий піксель»: вихідний знак — `assets/deadpixel.svg`, готові Windows ICO містять розміри 16–256 px.
-Після зміни геометрії або кольорів у `assets/Build-Icons.ps1` перегенеруйте іконки через
-`powershell.exe -NoProfile -ExecutionPolicy Bypass -File assets/Build-Icons.ps1` і виконайте `build.cmd`.
-У треї помаранчевий піксель означає звичайний стан, жовтий — попередження, червоний — новий непереглянутий збій.
-Кадри 16–64 px записані як 32-бітний BMP, 128/256 — як PNG: `System.Drawing.Icon` у .NET Framework показує PNG-кадри як шум.
+The "dead pixel" icon: the source mark is `assets/deadpixel.svg`; the Windows ICO files contain sizes 16–256 px.
+After changing geometry or colors in `assets/Build-Icons.ps1`, regenerate the icons with
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File assets/Build-Icons.ps1` and run `build.cmd`.
+In the tray, an orange pixel means normal state, yellow a warning, red a new unseen failure.
+Frames 16–64 px are stored as 32-bit BMP, 128/256 as PNG: `System.Drawing.Icon` in .NET Framework renders PNG frames as noise.
 
-**Ярлики** — «Налаштування → Ярлик на робочому столі / у меню «Пуск»» або `DeadPixel.exe --shortcuts` (обидва одразу).
-Ярлик відкриває панель; якщо DEADPIXEL уже працює, повторний запуск лише показує її в наявному екземплярі.
+**Shortcuts** — "Settings → Desktop shortcut / Start menu shortcut" or `DeadPixel.exe --shortcuts` (both at once).
+A shortcut opens the panel; if DEADPIXEL is already running, a second launch just shows it in the running instance.
 
-## Релізи
+## Releases
 
-Готові збірки — на сторінці [Releases](https://github.com/SamuiRo/DEADPIXEL/releases): інсталятор `DEADPIXEL-X.Y.Z-setup.exe`
-(для поточного користувача, без прав адміністратора) або `DEADPIXEL-X.Y.Z-portable.zip`.
+Ready-made builds are on the [Releases](https://github.com/SamuiRo/DEADPIXEL/releases) page: the installer
+`DEADPIXEL-X.Y.Z-setup.exe` (per user, no admin rights) or `DEADPIXEL-X.Y.Z-portable.zip`.
 
-Як випустити нову версію:
-1. Змінити номер у `VERSION` і описати зміни в `CHANGELOG.md` у розділі `## [X.Y.Z] - дата`.
-2. Закомітити, поставити тег і відправити: `git tag vX.Y.Z` → `git push origin master --tags`.
-3. GitHub Actions (`.github/workflows/build.yml`) збере exe, інсталятор, zip, `SHA256SUMS.txt` і опублікує реліз
-   з текстом із `CHANGELOG.md`. Якщо тег не збігається з `VERSION`, реліз не створиться.
+How to release a new version:
+1. Change the number in `VERSION` and describe the changes in `CHANGELOG.md` under `## [X.Y.Z] - date`.
+2. Commit, tag and push: `git tag vX.Y.Z` → `git push origin master --tags`.
+3. GitHub Actions (`.github/workflows/build.yml`) builds the exe, installer, zip and `SHA256SUMS.txt` and publishes a release
+   with the text from `CHANGELOG.md`. If the tag does not match `VERSION`, no release is created.
 
-Той самий пакет локально: `powershell -NoProfile -File tools\Package.ps1` → `dist\`
-(інсталятор — лише якщо встановлено [Inno Setup 6](https://jrsoftware.org/isinfo.php), інакше тільки zip).
-Кожен коміт у `master` і кожен PR GitHub теж збирає й перевіряє синтаксис скриптів.
+The same package locally: `powershell -NoProfile -File tools\Package.ps1` → `dist\`
+(the installer only if [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed, otherwise just the zip).
+Every commit to `master` and every GitHub PR is also built and script syntax is checked.
 
-## Вимоги
+## Requirements
 
-- Windows 10 1607+ або Windows 11 (.NET Framework 4.6+ вже є в системі).
-- Дані GPU — лише для NVIDIA (через `nvidia-smi`); без нього програма пише лише CPU.
-- Температура CPU — якщо запущено LibreHardwareMonitor.
-- Аналіз дампів — WinDbg (`winget install Microsoft.WinDbg`); кнопка в програмі встановить його.
+- Windows 10 1607+ or Windows 11 (.NET Framework 4.6+ is already part of the system).
+- GPU data — NVIDIA only (via `nvidia-smi`); without it the app records CPU only.
+- CPU temperature — if LibreHardwareMonitor is running.
+- Dump analysis — WinDbg (`winget install Microsoft.WinDbg`); a button in the app installs it.
 
-## Ключі запуску
+## Command-line switches
 
-`--show` — відкрити панель, `--settings` — налаштування, `--page=Диски` — потрібна вкладка.
-`--shortcuts` — створити ярлики на робочому столі й у меню «Пуск».
-Службові (запускаються самі з UAC): `--analyze <dump>`, `--smart`, `--copydumps <dir>`.
+`--show` opens the panel, `--settings` the settings, `--page=Диски` a specific tab (the internal tab key; with the English UI the caption works too: `--page=Disks`).
+`--shortcuts` creates shortcuts on the desktop and in the Start menu.
+Internal (launched by the app itself with UAC): `--analyze <dump>`, `--smart`, `--copydumps <dir>`.
 
-## Дані та приватність
+## Data and privacy
 
-Усе, що програма збирає, лежить у `data/` поруч з exe (або в `%LOCALAPPDATA%\DeadPixel`, якщо туди писати не можна), звіти — у `reports/`.
-Обидві папки в `.gitignore`: там назви ваших програм, серійні номери дисків, ім'я ПК.
-Нічого не надсилається в мережу, крім завантаження символів Microsoft під час аналізу дампу.
-
-## Перехід із CrashDoctor
-
-DEADPIXEL — продовження CrashDoctor (`S:\Daedalus\Doctor`) під новою назвою. Що варто знати при переході:
-
-- **Дані не переносяться автоматично.** Щоб зберегти історію, скопіюйте `data\` зі старої папки поруч із `DeadPixel.exe` (формат файлів той самий).
-- **Автозапуск.** Ключ реєстру тепер `DeadPixel` (а не `CrashDoctor`). Вимкніть автозапуск у старій програмі й увімкніть у новій.
-- **Обидві програми можуть працювати одночасно** (різні mutex) — закрийте CrashDoctor, щоб не дублювати збір даних.
+Everything the app collects lives in `data/` next to the exe (or in `%LOCALAPPDATA%\DeadPixel` if that folder is not
+writable), reports in `reports/`. Both folders are in `.gitignore`: they contain your program names, disk serial numbers
+and PC name. Nothing is sent over the network, except downloading Microsoft symbols during dump analysis and the winget
+update check in the audit.
