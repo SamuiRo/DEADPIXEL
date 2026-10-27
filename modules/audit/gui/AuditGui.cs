@@ -678,7 +678,8 @@ namespace DeadPixel
                 var lbl2 = new Label { Text = "дн.", AutoSize = true, Location = new Point(162, 54) };
                 var info = new Label { Tag = "muted", Location = new Point(18, 90), Size = new Size(434, 84),
                     Text = "Аудит запуститься у фоні з низьким пріоритетом (о 12:00, або щойно ПК увімкнуть, якщо час пропущено) і займе кілька секунд. " +
-                           "Трей повідомить лише про нові серйозні проблеми. Зміна розкладу потребує прав адміністратора: з ними аудит бачить усі процеси." };
+                           "Трей повідомить лише про нові серйозні проблеми. За розкладом аудит працює без прав адміністратора — так безпечніше; " +
+                           "системні процеси й підписки WMI перевіряє «Сканувати з правами»." };
                 var ok = new Button { Text = "Зберегти", DialogResult = DialogResult.OK, AutoSize = true, Location = new Point(270, 186) };
                 var cancel = new Button { Text = "Скасувати", DialogResult = DialogResult.Cancel, AutoSize = true, Location = new Point(362, 186) };
                 on.CheckedChanged += (s, e) => days.Enabled = lbl.Enabled = lbl2.Enabled = on.Checked;
@@ -689,7 +690,13 @@ namespace DeadPixel
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 int n = on.Checked ? (int)days.Value : 0;
                 if (n == current) return;
-                RunAsync("Зберігаю розклад…", () => ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Schedule " + n, true), res =>
+                // Розклад працює без прав адміністратора, тож і зміна його UAC не потребує. Виняток — завдання, створене
+                // старою версією з найвищими правами: замінити його можна лише з правами (Audit.ps1 повідомляє NEEDS_ADMIN)
+                RunAsync("Зберігаю розклад…", () =>
+                {
+                    var r0 = ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Schedule " + n, false);
+                    return r0.Error != null && r0.Error.StartsWith("NEEDS_ADMIN") ? ModuleHost.RunScript<AuditReport>("Audit.ps1", "-Schedule " + n, true) : r0;
+                }, res =>
                 {
                     var r = Normalize((AuditReport)res);
                     if (r.Error != null) { SetStatus(r.Error, theme.Danger); return; }

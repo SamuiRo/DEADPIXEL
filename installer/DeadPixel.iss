@@ -77,7 +77,9 @@ begin
     RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\RunOnce', 'DeadPixelSetup');
     DeleteFile(ExpandConstant('{userdesktop}\DEADPIXEL.lnk'));
     DeleteFile(ExpandConstant('{userprograms}\DEADPIXEL.lnk'));
-    // Розклад аудиту створено з правами адміністратора - видалити його можна лише з ними (один UAC, лише якщо розклад є)
+    // Розклад аудиту працює без прав адміністратора - видаляємо звичайно; лише завдання від ранніх збірок
+    // (створене з найвищими правами) потребує UAC
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/Delete /TN "\DEADPIXEL\DEADPIXEL Audit" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     if Exec(ExpandConstant('{sys}\schtasks.exe'), '/Query /TN "\DEADPIXEL\DEADPIXEL Audit"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
       ShellExec('runas', ExpandConstant('{sys}\schtasks.exe'), '/Delete /TN "\DEADPIXEL\DEADPIXEL Audit" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;

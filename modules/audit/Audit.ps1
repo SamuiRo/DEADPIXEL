@@ -441,19 +441,36 @@ function Write-IgnoreList([string[]]$ids) {
 $TaskPath = '\DEADPIXEL\'
 $TaskName = 'DEADPIXEL Audit'
 
+function Get-ScheduleTask {
+    Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
+}
+
 function Get-ScheduleDays {
     try {
-        $t = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop
-        if ($t.State -eq 'Disabled') { return 0 }
+        $t = Get-ScheduleTask
+        if (-not $t -or $t.State -eq 'Disabled') { return 0 }
         [int](@($t.Triggers)[0].DaysInterval)
     } catch { 0 }
 }
 
 # Завдання запускає AuditGui.exe --background: це winexe, тож жодне вікно консолі не блимає.
-# Найвищі права - щоб бачити системні процеси й підписки WMI; тому й створення розкладу потребує UAC
+# Свідомо БЕЗ прав адміністратора: AuditGui.exe лежить у папці, куди може писати будь-яка програма користувача
+# (встановлення в %LOCALAPPDATA%\Programs), і завдання з найвищими правами стало б тією самою дірою, яку шукає аудит:
+# підмінив exe - отримав права адміністратора. Повну перевірку дає «Сканувати з правами» вручну.
 function Set-Schedule([int]$days) {
-    if (-not (Test-Admin)) { throw 'Щоб налаштувати розклад, потрібні права адміністратора.' }
-    Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    # Командлети ScheduledTasks (CDXML-модуль) не бачать $ErrorActionPreference скрипта - тому -ErrorAction Stop явно.
+    # Завдання, створене колись із правами адміністратора, звичайний користувач змінити не може: NEEDS_ADMIN для GUI
+    try { Set-ScheduleCore $days }
+    catch {
+        if (-not (Test-Admin) -and ($_.Exception.Message -match 'denied|0x80070005|заборон' -or $_.CategoryInfo.Category -eq 'PermissionDenied')) {
+            throw 'NEEDS_ADMIN: розклад створено з правами адміністратора - змінити його можна лише з ними.'
+        }
+        throw
+    }
+}
+
+function Set-ScheduleCore([int]$days) {
+    if (Get-ScheduleTask) { Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false -ErrorAction Stop }
     if ($days -le 0) { return }
     $gui = Join-Path $PSScriptRoot 'AuditGui.exe'
     if (-not (Test-Path $gui)) { throw "Не знайдено $gui" }
@@ -461,9 +478,9 @@ function Set-Schedule([int]$days) {
     $trigger = New-ScheduledTaskTrigger -Daily -DaysInterval $days -At '12:00'
     # Пропущений запуск (ПК був вимкнений) - одразу, щойно ПК увімкнуть; низький пріоритет; не довше 15 хв
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -Priority 7 -MultipleInstances IgnoreNew
-    $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Highest
+    $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
-        -Description 'DEADPIXEL: перевірка безпеки і стану системи. Лише читає систему; результат - у треї і вікні «Аудит системи».' | Out-Null
+        -Description 'DEADPIXEL: перевірка безпеки і стану системи. Лише читає систему; результат - у треї і вікні «Аудит системи».' -ErrorAction Stop | Out-Null
 }
 
 # ---------------------------------------------------------------- звіт

@@ -178,9 +178,15 @@ function Move-ToQuarantine($it, [string]$dir, [int]$n) {
             return @{ XmlFile = $f }
         }
         'PathEntry' {
+            # Запам'ятовуємо позицію: порядок у PATH визначає, яка з однойменних програм запуститься
             $entry = $it.Target
-            Update-PathValue $it.Scope { param($parts) @($parts | Where-Object { $_.TrimEnd('\') -ne $entry.TrimEnd('\') }) }
-            return @{}
+            $script:PathIndex = -1
+            Update-PathValue $it.Scope {
+                param($parts)
+                for ($i = 0; $i -lt $parts.Count; $i++) { if ($parts[$i].TrimEnd('\') -eq $entry.TrimEnd('\')) { $script:PathIndex = $i; break } }
+                @($parts | Where-Object { $_.TrimEnd('\') -ne $entry.TrimEnd('\') })
+            }
+            return @{ Index = $script:PathIndex }
         }
         'FirewallRule' {
             $idx = Get-FirewallIndex
@@ -258,8 +264,15 @@ function Restore-Quarantine([string]$id) {
                 'RegistryValue' { New-ItemProperty -LiteralPath $it.Key -Name $it.Name -Value $sv.Value -PropertyType $sv.ValueKind -Force | Out-Null }
                 'Task' { Register-ScheduledTask -Xml (Get-Content (Join-Path $s.Dir $sv.XmlFile) -Raw -Encoding Unicode) -TaskPath $it.Key -TaskName $it.Name | Out-Null }
                 'PathEntry' {
-                    $entry = $it.Target
-                    Update-PathValue $it.Scope { param($parts) if ($parts | Where-Object { $_.TrimEnd('\') -eq $entry.TrimEnd('\') }) { $parts } else { @($parts) + $entry } }
+                    $entry = $it.Target; $at = if ($null -ne $sv.Index) { [int]$sv.Index } else { -1 }
+                    Update-PathValue $it.Scope {
+                        param($parts)
+                        if ($parts | Where-Object { $_.TrimEnd('\') -eq $entry.TrimEnd('\') }) { return $parts }
+                        $list = New-Object Collections.Generic.List[string]
+                        foreach ($p in $parts) { $list.Add($p) }
+                        if ($at -ge 0 -and $at -le $list.Count) { $list.Insert($at, $entry) } else { $list.Add($entry) }
+                        $list.ToArray()
+                    }
                 }
                 'FirewallRule' {
                     foreach ($r in @($sv.Rules)) {
