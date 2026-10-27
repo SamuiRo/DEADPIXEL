@@ -45,6 +45,8 @@ uk.Autostart=Запускати DEADPIXEL разом із Windows
 en.Autostart=Start DEADPIXEL with Windows
 uk.DeleteData=Видалити також зібрані дані (чорна скринька, звіти, налаштування)?%n%nЯкщо плануєте встановити DEADPIXEL знову, натисніть «Ні» — історія крашів збережеться.
 en.DeleteData=Also delete collected data (black box, reports, settings)?%n%nChoose "No" if you plan to reinstall DEADPIXEL and want to keep crash history.
+uk.ShortcutComment=DEADPIXEL — моніторинг і діагностика збоїв
+en.ShortcutComment=DEADPIXEL — monitoring and crash diagnostics
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -55,8 +57,8 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 
 [Icons]
 ; Ті самі імена, що створює програма (Shortcuts.cs), — щоб не було двох однакових ярликів
-Name: "{autoprograms}\DEADPIXEL"; Filename: "{app}\DeadPixel.exe"; Parameters: "--show"; Comment: "DEADPIXEL — моніторинг і діагностика збоїв"
-Name: "{autodesktop}\DEADPIXEL"; Filename: "{app}\DeadPixel.exe"; Parameters: "--show"; Comment: "DEADPIXEL — моніторинг і діагностика збоїв"; Tasks: desktopicon
+Name: "{autoprograms}\DEADPIXEL"; Filename: "{app}\DeadPixel.exe"; Parameters: "--show"; Comment: "{cm:ShortcutComment}"
+Name: "{autodesktop}\DEADPIXEL"; Filename: "{app}\DeadPixel.exe"; Parameters: "--show"; Comment: "{cm:ShortcutComment}"; Tasks: desktopicon
 
 [Registry]
 ; Те саме значення, що пише галочка автозапуску в налаштуваннях програми (Settings.cs)

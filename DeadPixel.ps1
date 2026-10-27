@@ -7,48 +7,52 @@
   .\DeadPixel.ps1                # останні 14 днів, HTML-звіт відкриється у браузері
   .\DeadPixel.ps1 -Days 60       # за 60 днів
   .\DeadPixel.ps1 -NoOpen        # не відкривати звіт автоматично
+  .\DeadPixel.ps1 -Lang en       # мова звіту (system / uk / en; за замовчуванням - з налаштувань)
 #>
 param(
     [int]$Days = 14,
     [string]$OutDir = (Join-Path $PSScriptRoot 'reports'),
-    [switch]$NoOpen
+    [switch]$NoOpen,
+    [string]$Lang
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
+. (Join-Path $PSScriptRoot 'modules\common\Lang.ps1')
+$script:UiLang = Resolve-UiLang $Lang $PSScriptRoot
 $since = (Get-Date).AddDays(-$Days)
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 # --- Довідник кодів BSOD (найчастіші) -------------------------------------
 $BugChecks = @{
-    0x0A  = @('IRQL_NOT_LESS_OR_EQUAL', 'Драйвер звернувся до недопустимої пам''яті. Часто драйвери або RAM/розгін.')
-    0x1A  = @('MEMORY_MANAGEMENT', 'Помилка керування пам''яттю. Перевірити RAM (MemTest86), вимкнути EXPO/XMP.')
-    0x1E  = @('KMODE_EXCEPTION_NOT_HANDLED', 'Необроблений виняток у драйвері.')
-    0x3B  = @('SYSTEM_SERVICE_EXCEPTION', 'Виняток у системному виклику, часто драйвер.')
-    0x50  = @('PAGE_FAULT_IN_NONPAGED_AREA', 'Звернення до неіснуючої пам''яті: драйвер, RAM або диск.')
-    0x7E  = @('SYSTEM_THREAD_EXCEPTION_NOT_HANDLED', 'Необроблений виняток у системному потоці (драйвер).')
-    0x7F  = @('UNEXPECTED_KERNEL_MODE_TRAP', 'Апаратна проблема або розгін CPU/RAM.')
-    0x9F  = @('DRIVER_POWER_STATE_FAILURE', 'Драйвер не впорався з переходом у сон/пробудження.')
-    0xA0  = @('INTERNAL_POWER_ERROR', 'Помилка керування живленням.')
-    0xD1  = @('DRIVER_IRQL_NOT_LESS_OR_EQUAL', 'Драйвер звернувся до пам''яті на високому IRQL.')
-    0xEF  = @('CRITICAL_PROCESS_DIED', 'Критичний системний процес завершився (диск/система).')
-    0x101 = @('CLOCK_WATCHDOG_TIMEOUT', 'Ядро CPU не відповідає: розгін/Curve Optimizer/нестабільний CPU.')
-    0x116 = @('VIDEO_TDR_FAILURE', 'Відеодрайвер завис, і Windows не змогла його перезапустити. Драйвер GPU, розгін GPU, живлення відеокарти.')
-    0x117 = @('VIDEO_TDR_TIMEOUT_DETECTED', 'Відеодрайвер перестав відповідати (відновлено).')
-    0x119 = @('VIDEO_SCHEDULER_INTERNAL_ERROR', 'Помилка планувальника GPU (драйвер/GPU).')
-    0x124 = @('WHEA_UNCORRECTABLE_ERROR', 'Некоректовна апаратна помилка (CPU/RAM/PCIe). Дивіться розділ WHEA.')
-    0x133 = @('DPC_WATCHDOG_VIOLATION', 'Драйвер занадто довго тримав процесор (часто GPU/диск/мережа).')
-    0x139 = @('KERNEL_SECURITY_CHECK_FAILURE', 'Пошкодження структур ядра: драйвер або RAM.')
-    0x141 = @('VIDEO_ENGINE_TIMEOUT_DETECTED', 'GPU перестав відповідати, Windows перезапустила драйвер (без BSOD).')
-    0x144 = @('BUGCODE_USB3_DRIVER', 'Помилка USB3-драйвера.')
-    0x154 = @('UNEXPECTED_STORE_EXCEPTION', 'Проблема з диском або пам''яттю.')
-    0x15F = @('CONNECTED_STANDBY_WATCHDOG_TIMEOUT_LIVEDUMP', 'Зависання під час сну.')
-    0x1A8 = @('BUGCODE_NDIS_DRIVER_LIVE_DUMP', 'Мережевий драйвер.')
-    0x1B8 = @('GPU_LIVE_DUMP', 'Живий дамп стану GPU, знятий разом із TDR.')
+    0x0A  = @('IRQL_NOT_LESS_OR_EQUAL', (T 'Драйвер звернувся до недопустимої пам''яті. Часто драйвери або RAM/розгін.' 'A driver accessed invalid memory. Often drivers or RAM/overclocking.'))
+    0x1A  = @('MEMORY_MANAGEMENT', (T 'Помилка керування пам''яттю. Перевірити RAM (MemTest86), вимкнути EXPO/XMP.' 'Memory management error. Test RAM (MemTest86), disable EXPO/XMP.'))
+    0x1E  = @('KMODE_EXCEPTION_NOT_HANDLED', (T 'Необроблений виняток у драйвері.' 'Unhandled exception in a driver.'))
+    0x3B  = @('SYSTEM_SERVICE_EXCEPTION', (T 'Виняток у системному виклику, часто драйвер.' 'Exception in a system call, often a driver.'))
+    0x50  = @('PAGE_FAULT_IN_NONPAGED_AREA', (T 'Звернення до неіснуючої пам''яті: драйвер, RAM або диск.' 'Access to non-existent memory: driver, RAM or disk.'))
+    0x7E  = @('SYSTEM_THREAD_EXCEPTION_NOT_HANDLED', (T 'Необроблений виняток у системному потоці (драйвер).' 'Unhandled exception in a system thread (driver).'))
+    0x7F  = @('UNEXPECTED_KERNEL_MODE_TRAP', (T 'Апаратна проблема або розгін CPU/RAM.' 'Hardware problem or CPU/RAM overclocking.'))
+    0x9F  = @('DRIVER_POWER_STATE_FAILURE', (T 'Драйвер не впорався з переходом у сон/пробудження.' 'A driver failed a sleep/wake transition.'))
+    0xA0  = @('INTERNAL_POWER_ERROR', (T 'Помилка керування живленням.' 'Power management error.'))
+    0xD1  = @('DRIVER_IRQL_NOT_LESS_OR_EQUAL', (T 'Драйвер звернувся до пам''яті на високому IRQL.' 'A driver accessed memory at a high IRQL.'))
+    0xEF  = @('CRITICAL_PROCESS_DIED', (T 'Критичний системний процес завершився (диск/система).' 'A critical system process died (disk/system).'))
+    0x101 = @('CLOCK_WATCHDOG_TIMEOUT', (T 'Ядро CPU не відповідає: розгін/Curve Optimizer/нестабільний CPU.' 'A CPU core stopped responding: overclocking/Curve Optimizer/unstable CPU.'))
+    0x116 = @('VIDEO_TDR_FAILURE', (T 'Відеодрайвер завис, і Windows не змогла його перезапустити. Драйвер GPU, розгін GPU, живлення відеокарти.' 'The graphics driver hung and Windows could not restart it. GPU driver, GPU overclock, graphics card power.'))
+    0x117 = @('VIDEO_TDR_TIMEOUT_DETECTED', (T 'Відеодрайвер перестав відповідати (відновлено).' 'The graphics driver stopped responding (recovered).'))
+    0x119 = @('VIDEO_SCHEDULER_INTERNAL_ERROR', (T 'Помилка планувальника GPU (драйвер/GPU).' 'GPU scheduler error (driver/GPU).'))
+    0x124 = @('WHEA_UNCORRECTABLE_ERROR', (T 'Некоректовна апаратна помилка (CPU/RAM/PCIe). Дивіться розділ WHEA.' 'Uncorrectable hardware error (CPU/RAM/PCIe). See the WHEA section.'))
+    0x133 = @('DPC_WATCHDOG_VIOLATION', (T 'Драйвер занадто довго тримав процесор (часто GPU/диск/мережа).' 'A driver held the CPU too long (often GPU/disk/network).'))
+    0x139 = @('KERNEL_SECURITY_CHECK_FAILURE', (T 'Пошкодження структур ядра: драйвер або RAM.' 'Kernel structure corruption: driver or RAM.'))
+    0x141 = @('VIDEO_ENGINE_TIMEOUT_DETECTED', (T 'GPU перестав відповідати, Windows перезапустила драйвер (без BSOD).' 'The GPU stopped responding and Windows restarted the driver (no BSOD).'))
+    0x144 = @('BUGCODE_USB3_DRIVER', (T 'Помилка USB3-драйвера.' 'USB3 driver error.'))
+    0x154 = @('UNEXPECTED_STORE_EXCEPTION', (T 'Проблема з диском або пам''яттю.' 'Disk or memory problem.'))
+    0x15F = @('CONNECTED_STANDBY_WATCHDOG_TIMEOUT_LIVEDUMP', (T 'Зависання під час сну.' 'Hang during sleep.'))
+    0x1A8 = @('BUGCODE_NDIS_DRIVER_LIVE_DUMP', (T 'Мережевий драйвер.' 'Network driver.'))
+    0x1B8 = @('GPU_LIVE_DUMP', (T 'Живий дамп стану GPU, знятий разом із TDR.' 'Live GPU state dump taken together with a TDR.'))
 }
 function Get-BugCheckInfo([string]$hex) {
     $code = [Convert]::ToInt64(($hex -replace '^0x', ''), 16)
     if ($BugChecks.ContainsKey([int]$code)) { return $BugChecks[[int]$code] }
-    return @('UNKNOWN', ('Невідомий код — шукайте "bugcheck 0x{0:X}"' -f $code))
+    return @('UNKNOWN', ((T 'Невідомий код — шукайте "bugcheck 0x{0:X}"' 'Unknown code — search for "bugcheck 0x{0:X}"') -f $code))
 }
 function Short([string]$s, [int]$n = 300) {
     $s = ($s -replace '\s+', ' ').Trim()
@@ -60,8 +64,8 @@ function Get-Ev($filter, [int]$max = 2000) {
     @(Get-WinEvent -FilterHashtable $filter -MaxEvents $max -ErrorAction SilentlyContinue)
 }
 
-Write-Host "DEADPIXEL: збираю дані за $Days днів..." -ForegroundColor Cyan
-if (-not $isAdmin) { Write-Host "  (без прав адміністратора частина даних недоступна — запускайте через DeadPixel.cmd)" -ForegroundColor Yellow }
+Write-Host (T "DEADPIXEL: збираю дані за $Days днів..." "DEADPIXEL: collecting data for $Days days...") -ForegroundColor Cyan
+if (-not $isAdmin) { Write-Host (T '  (без прав адміністратора частина даних недоступна — запускайте через DeadPixel.cmd)' '  (some data is unavailable without administrator rights — run via DeadPixel.cmd)') -ForegroundColor Yellow }
 
 # --- 1. Непередбачені перезавантаження ------------------------------------
 $unexpected = Get-Ev @{LogName = 'System'; ProviderName = 'Microsoft-Windows-Kernel-Power'; Id = 41 }
@@ -80,7 +84,7 @@ $crashRows = foreach ($e in $unexpected) {
     } elseif ($bc -and [int64]$bc -ne 0) {
         $code = '0x{0:X8}' -f [int64]$bc
     }
-    $info = if ($code) { Get-BugCheckInfo $code } else { @('—', 'Без BSOD: раптова втрата живлення, зависання з ручним ресетом, або БЖ/перегрів.') }
+    $info = if ($code) { Get-BugCheckInfo $code } else { @('—', (T 'Без BSOD: раптова втрата живлення, зависання з ручним ресетом, або БЖ/перегрів.' 'No BSOD: sudden power loss, a hang with a manual reset, or PSU/overheating.')) }
     $driver = ''
     if ($drv) { $driver = [string]$drv.Properties[0].Value }
     [pscustomobject]@{
@@ -132,9 +136,10 @@ $diskSummary = $diskEv | Group-Object ProviderName, Id | ForEach-Object {
 # --- 5. Збої програм -------------------------------------------------------
 $appCrash = Get-Ev @{LogName = 'Application'; ProviderName = 'Application Error'; Id = 1000 }
 $appHang  = Get-Ev @{LogName = 'Application'; ProviderName = 'Application Hang'; Id = 1002 }
+$hangLabel = T '(зависання)' '(hang)'
 $appSummary = @($appCrash + $appHang) | ForEach-Object {
     $exe = $_.Properties[0].Value
-    $mod = if ($_.Id -eq 1000) { $_.Properties[3].Value } else { '(зависання)' }
+    $mod = if ($_.Id -eq 1000) { $_.Properties[3].Value } else { $hangLabel }
     [pscustomobject]@{ Exe = $exe; Module = $mod; Time = $_.TimeCreated }
 } | Group-Object Exe, Module | ForEach-Object {
     [pscustomobject]@{ App = $_.Group[0].Exe; Module = $_.Group[0].Module; Count = $_.Count; Last = ($_.Group.Time | Sort-Object -Descending)[0] }
@@ -165,36 +170,37 @@ function Add-Finding($level, $title, $text) { $findings.Add([pscustomobject]@{ L
 
 $gpuCrashes = @($crashRows | Where-Object { $_.Code -and ([Convert]::ToInt64(($_.Code -replace '^0x', ''), 16) -in 0x116, 0x117, 0x119) })
 $gpuDrivers = @($crashRows | Where-Object { $_.Driver -match 'nvlddmkm|amdkmdag|atikmdag|igdkmd|dxgkrnl' })
-if ($gpuCrashes.Count -or $gpuDrivers.Count -or @($lke | Where-Object { $_.Code -match '^0x(141|117)$' }).Count) {
+$gpuHangs = @($lke | Where-Object { $_.Code -match '^0x(141|117)$' }).Count
+if ($gpuCrashes.Count -or $gpuDrivers.Count -or $gpuHangs) {
     $nv = $gpus | Where-Object Name -match 'NVIDIA' | Select-Object -First 1
-    $t = "BSOD через відеодрайвер: $($gpuCrashes.Count), відновлених зависань GPU (LiveKernelEvent 141/117): $(@($lke | Where-Object { $_.Code -match '^0x(141|117)$' }).Count)."
-    if ($nv -and $nv.AgeDays -gt 90) { $t += " Драйвер $($nv.Name) $($nv.Driver) має вік $($nv.AgeDays) днів — оновіть (чиста інсталяція, або DDU)." }
-    $t += ' Також перевірте: розгін/андервольт GPU (MSI Afterburner), окремі кабелі 12V-2x6/PCIe від БЖ і чи щільно вставлений роз''єм, вимкнути "Аппаратне прискорення планування GPU" для тесту.'
-    Add-Finding 'crit' 'Проблема з відеокартою / драйвером GPU' $t
+    $t = T "BSOD через відеодрайвер: $($gpuCrashes.Count), відновлених зависань GPU (LiveKernelEvent 141/117): $gpuHangs." "BSODs caused by the graphics driver: $($gpuCrashes.Count), recovered GPU hangs (LiveKernelEvent 141/117): $gpuHangs."
+    if ($nv -and $nv.AgeDays -gt 90) { $t += T " Драйвер $($nv.Name) $($nv.Driver) має вік $($nv.AgeDays) днів — оновіть (чиста інсталяція, або DDU)." " Driver $($nv.Name) $($nv.Driver) is $($nv.AgeDays) days old — update it (clean install, or DDU)." }
+    $t += T ' Також перевірте: розгін/андервольт GPU (MSI Afterburner), окремі кабелі 12V-2x6/PCIe від БЖ і чи щільно вставлений роз''єм, вимкнути "Аппаратне прискорення планування GPU" для тесту.' ' Also check: GPU overclock/undervolt (MSI Afterburner), separate 12V-2x6/PCIe cables from the PSU and that the connector is fully seated; turn off "Hardware-accelerated GPU scheduling" as a test.'
+    Add-Finding 'crit' (T 'Проблема з відеокартою / драйвером GPU' 'Graphics card / GPU driver problem') $t
 }
 $dpc = @($crashRows | Where-Object { $_.Code -match '0x0*133$' })
-if ($dpc.Count) { Add-Finding 'warn' "DPC_WATCHDOG_VIOLATION ×$($dpc.Count)" 'Драйвер занадто довго блокував CPU. Часто це той самий GPU-драйвер, рідше драйвер NVMe/мережі/USB.' }
+if ($dpc.Count) { Add-Finding 'warn' "DPC_WATCHDOG_VIOLATION ×$($dpc.Count)" (T 'Драйвер занадто довго блокував CPU. Часто це той самий GPU-драйвер, рідше драйвер NVMe/мережі/USB.' 'A driver blocked the CPU too long. Often the same GPU driver, less often an NVMe/network/USB driver.') }
 $noBsod = @($crashRows | Where-Object { -not $_.Code })
-if ($noBsod.Count) { Add-Finding 'warn' "Раптові вимкнення без BSOD ×$($noBsod.Count)" 'Втрата живлення, ручний ресет під час зависання, спрацювання захисту БЖ або перегрів.' }
+if ($noBsod.Count) { Add-Finding 'warn' ((T 'Раптові вимкнення без BSOD ×' 'Sudden shutdowns without BSOD ×') + $noBsod.Count) (T 'Втрата живлення, ручний ресет під час зависання, спрацювання захисту БЖ або перегрів.' 'Power loss, a manual reset during a hang, PSU protection tripping, or overheating.') }
 $usb = @($lke | Where-Object { $_.Code -match '^0x144$' }).Count
-if ($usb) { Add-Finding 'warn' "Збої USB3-контролера (0x144) ×$usb" 'Проблемний USB-пристрій (часто зовнішній диск/хаб) або драйвер USB. Спробуйте інший порт (ззаду на платі), без хабів, оновіть чипсет-драйвер AMD.' }
-if ($whea.Count) { Add-Finding 'crit' "Апаратні помилки WHEA ×$($whea.Count)" 'CPU/RAM/PCIe повідомляють про помилки. Скиньте розгін (EXPO/PBO/Curve Optimizer), перевірте RAM.' }
+if ($usb) { Add-Finding 'warn' ((T 'Збої USB3-контролера (0x144) ×' 'USB3 controller failures (0x144) ×') + $usb) (T 'Проблемний USB-пристрій (часто зовнішній диск/хаб) або драйвер USB. Спробуйте інший порт (ззаду на платі), без хабів, оновіть чипсет-драйвер AMD.' 'A faulty USB device (often an external disk/hub) or USB driver. Try another port (on the back of the board), without hubs, and update the chipset driver.') }
+if ($whea.Count) { Add-Finding 'crit' ((T 'Апаратні помилки WHEA ×' 'WHEA hardware errors ×') + $whea.Count) (T 'CPU/RAM/PCIe повідомляють про помилки. Скиньте розгін (EXPO/PBO/Curve Optimizer), перевірте RAM.' 'CPU/RAM/PCIe report errors. Reset overclocking (EXPO/PBO/Curve Optimizer) and test RAM.') }
 $badDisk = $diskSummary | Where-Object { $_.Source -match '^disk, (7|51|153|154)$' }
 if ($badDisk) {
     $known = @($disks.DeviceId)
     foreach ($d in $badDisk | Group-Object Disk) {
         $cnt = ($d.Group | Measure-Object Count -Sum).Sum
         $absent = $d.Name -and ($known -notcontains $d.Name)
-        $txt = "Помилки введення-виведення: $cnt шт. (лічильник обмежено 5000 на тип)."
-        if ($absent) { $txt += " Диска №$($d.Name) зараз немає в системі — ймовірно, це USB-флешка / зовнішній диск / кардрідер. Перевірте його окремо (chkdsk, CrystalDiskInfo) або не підключайте." }
-        Add-Finding 'warn' "Помилки диска №$($d.Name)" $txt
+        $txt = T "Помилки введення-виведення: $cnt шт. (лічильник обмежено 5000 на тип)." "I/O errors: $cnt (counter capped at 5000 per type)."
+        if ($absent) { $txt += T " Диска №$($d.Name) зараз немає в системі — ймовірно, це USB-флешка / зовнішній диск / кардрідер. Перевірте його окремо (chkdsk, CrystalDiskInfo) або не підключайте." " Disk #$($d.Name) is not in the system now — probably a USB stick / external disk / card reader. Check it separately (chkdsk, CrystalDiskInfo) or stop connecting it." }
+        Add-Finding 'warn' ((T 'Помилки диска №' 'Errors on disk #') + $d.Name) $txt
     }
 }
-if (-not $findings.Count) { Add-Finding 'ok' 'Критичних проблем не знайдено' "За $Days днів немає аварійних перезавантажень." }
+if (-not $findings.Count) { Add-Finding 'ok' (T 'Критичних проблем не знайдено' 'No critical problems found') (T "За $Days днів немає аварійних перезавантажень." "No crash restarts in $Days days.") }
 
 # --- 9. HTML-звіт ----------------------------------------------------------
 function Table($rows, [string[]]$cols) {
-    if (-not $rows) { return '<p class="muted">Немає записів.</p>' }
+    if (-not $rows) { return '<p class="muted">' + (T 'Немає записів.' 'No records.') + '</p>' }
     $h = '<div class="tw"><table><tr>' + (($cols | ForEach-Object { "<th>$(Enc $_)</th>" }) -join '') + '</tr>'
     foreach ($r in $rows) {
         $h += '<tr>' + (($cols | ForEach-Object {
@@ -221,7 +227,7 @@ $lkrRows = $lkrFiles | Select-Object -First 30 | ForEach-Object { [pscustomobjec
 $dumpRows = $minidumps | ForEach-Object { [pscustomobject]@{ Time = $_.LastWriteTime; File = $_.FullName; SizeMB = [math]::Round($_.Length / 1MB, 1) } }
 
 $html = @"
-<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!doctype html><html lang="$UiLang"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DEADPIXEL $stamp</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--fg:#1c1f24;--muted:#6b7280;--line:#e3e6ea;--crit:#c62828;--warn:#b26a00;--ok:#2e7d32}
@@ -236,63 +242,63 @@ th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertic
 code{font-family:Consolas,monospace}
 </style></head><body><main>
 <h1>DEADPIXEL</h1>
-<div class="muted">$(Enc $env:COMPUTERNAME) · звіт від $(Get-Date -Format 'yyyy-MM-dd HH:mm') · період: $Days днів · адмін: $isAdmin</div>
+<div class="muted">$(Enc $env:COMPUTERNAME) · $(T 'звіт від' 'report of') $(Get-Date -Format 'yyyy-MM-dd HH:mm') · $(T 'період' 'period'): $Days $(T 'днів' 'days') · $(T 'адмін' 'admin'): $isAdmin</div>
 
-<h2>Висновки</h2>
+<h2>$(T 'Висновки' 'Findings')</h2>
 $findingsHtml
 
-<h2>Аварійні перезавантаження ($(@($crashRows).Count))</h2>
+<h2>$(T 'Аварійні перезавантаження' 'Crash restarts') ($(@($crashRows).Count))</h2>
 $(Table ($crashRows | Sort-Object Time -Descending) @('Time','Code','Name','Driver','Hint','Params','Dump'))
 
-<h2>Відновлені зависання ядра / GPU (LiveKernelEvent)</h2>
+<h2>$(T 'Відновлені зависання ядра / GPU (LiveKernelEvent)' 'Recovered kernel / GPU hangs (LiveKernelEvent)')</h2>
 $(Table $lke @('Time','Code','Name','File'))
 $(Table $lkrRows @('Time','Type','File','SizeMB'))
 
-<h2>Події відеодрайвера (TDR)</h2>
+<h2>$(T 'Події відеодрайвера (TDR)' 'Graphics driver events (TDR)')</h2>
 $(Table $tdrRows @('Time','Source','Message'))
 
-<h2>Апаратні помилки WHEA ($(@($whea).Count))</h2>
+<h2>$(T 'Апаратні помилки WHEA' 'WHEA hardware errors') ($(@($whea).Count))</h2>
 $(Table $wheaRows @('Time','Id','Message'))
 
-<h2>Помилки дисків</h2>
+<h2>$(T 'Помилки дисків' 'Disk errors')</h2>
 $(Table $diskSummary @('Source','Count','Disk','Last','Example'))
 
-<h2>Збої та зависання програм (топ-20)</h2>
+<h2>$(T 'Збої та зависання програм (топ-20)' 'Application crashes and hangs (top 20)')</h2>
 $(Table $appSummary @('App','Module','Count','Last'))
 
-<h2>Штатні перезавантаження / вимкнення</h2>
+<h2>$(T 'Штатні перезавантаження / вимкнення' 'Planned restarts / shutdowns')</h2>
 $(Table ($planned | Select-Object -First 20) @('Time','Proc','Reason','Type'))
 
-<h2>Система</h2>
+<h2>$(T 'Система' 'System')</h2>
 <div class="card">
-<b>ОС:</b> $(Enc $os.Caption) $(Enc $os.Version) (build $(Enc $os.BuildNumber)) · аптайм $([int]$uptime.TotalHours) год<br>
+<b>$(T 'ОС' 'OS'):</b> $(Enc $os.Caption) $(Enc $os.Version) (build $(Enc $os.BuildNumber)) · $(T 'аптайм' 'uptime') $([int]$uptime.TotalHours) $(T 'год' 'h')<br>
 <b>CPU:</b> $(Enc $cpu) · <b>RAM:</b> $ram GB<br>
-<b>Плата:</b> $(Enc $mb.Manufacturer) $(Enc $mb.Product) · <b>BIOS:</b> $(Enc $bios.SMBIOSBIOSVersion) ($(if($bios.ReleaseDate){$bios.ReleaseDate.ToString('yyyy-MM-dd')}))
+<b>$(T 'Плата' 'Board'):</b> $(Enc $mb.Manufacturer) $(Enc $mb.Product) · <b>BIOS:</b> $(Enc $bios.SMBIOSBIOSVersion) ($(if($bios.ReleaseDate){$bios.ReleaseDate.ToString('yyyy-MM-dd')}))
 </div>
 $(Table $gpus @('Name','Driver','Date','AgeDays'))
 $(Table $disks @('DeviceId','FriendlyName','MediaType','BusType','HealthStatus'))
 
-<h2>Файли дампів</h2>
+<h2>$(T 'Файли дампів' 'Dump files')</h2>
 $(Table $dumpRows @('Time','File','SizeMB'))
-<p class="muted">Детальний аналіз дампу: встановіть WinDbg (<code>winget install Microsoft.WinDbg</code>), відкрийте .dmp і виконайте <code>!analyze -v</code>. Або BlueScreenView від NirSoft.</p>
+<p class="muted">$(T 'Детальний аналіз дампу: встановіть WinDbg (<code>winget install Microsoft.WinDbg</code>), відкрийте .dmp і виконайте <code>!analyze -v</code>. Або BlueScreenView від NirSoft.' 'Detailed dump analysis: install WinDbg (<code>winget install Microsoft.WinDbg</code>), open the .dmp and run <code>!analyze -v</code>. Or BlueScreenView by NirSoft.')</p>
 </main></body></html>
 "@
 $html | Out-File -Encoding utf8 $htmlPath
 
 # Текстова версія — зручно скопіювати в чат
 $txt = @()
-$txt += "DEADPIXEL $stamp | $env:COMPUTERNAME | $Days днів"
-$txt += "`n== ВИСНОВКИ =="
+$txt += "DEADPIXEL $stamp | $env:COMPUTERNAME | $Days " + (T 'днів' 'days')
+$txt += "`n== " + (T 'ВИСНОВКИ' 'FINDINGS') + " =="
 $txt += $findings | ForEach-Object { "[$($_.Level.ToUpper())] $($_.Title)`n    $($_.Text)" }
-$txt += "`n== АВАРІЙНІ ПЕРЕЗАВАНТАЖЕННЯ =="
+$txt += "`n== " + (T 'АВАРІЙНІ ПЕРЕЗАВАНТАЖЕННЯ' 'CRASH RESTARTS') + " =="
 $txt += $crashRows | Sort-Object Time -Descending | ForEach-Object { "{0:yyyy-MM-dd HH:mm}  {1,-10} {2,-32} {3}" -f $_.Time, $_.Code, $_.Name, $_.Driver }
 $txt += "`n== LiveKernelEvent =="
 $txt += $lke | ForEach-Object { "{0:yyyy-MM-dd HH:mm}  {1,-6} {2,-32} {3}" -f $_.Time, $_.Code, $_.Name, $_.File }
 $txt += "`n== GPU =="
-$txt += $gpus | ForEach-Object { "{0}  driver {1}  ({2} днів)" -f $_.Name, $_.Driver, $_.AgeDays }
-$txt += "`n== ДИСКИ (помилки) =="
+$txt += $gpus | ForEach-Object { "{0}  driver {1}  ({2} {3})" -f $_.Name, $_.Driver, $_.AgeDays, (T 'днів' 'days') }
+$txt += "`n== " + (T 'ДИСКИ (помилки)' 'DISKS (errors)') + " =="
 $txt += $diskSummary | ForEach-Object { "{0,-14} x{1,-6} disk {2}  last {3:yyyy-MM-dd HH:mm}" -f $_.Source, $_.Count, $_.Disk, $_.Last }
-$txt += "`n== WHEA: $(@($whea).Count) подій"
+$txt += "`n== WHEA: $(@($whea).Count) " + (T 'подій' 'events')
 $txt -join "`n" | Out-File -Encoding utf8 $txtPath
 
 Write-Host ''
@@ -301,5 +307,5 @@ $findings | ForEach-Object {
     Write-Host "[$($_.Level.ToUpper())] $($_.Title)" -ForegroundColor $c
     Write-Host "    $($_.Text)"
 }
-Write-Host "`nЗвіт: $htmlPath`nТекст: $txtPath" -ForegroundColor Cyan
+Write-Host ((T "`nЗвіт: " "`nReport: ") + $htmlPath + (T "`nТекст: " "`nText: ") + $txtPath) -ForegroundColor Cyan
 if (-not $NoOpen) { Start-Process $htmlPath }
