@@ -74,6 +74,20 @@ function Limited($r) {
     if (-not (Test-Admin)) { $r.NeedsAdmin = $true }
     $r
 }
+
+# Що можна прибрати (через карантин модуля Setup): кожен пункт - Kind + поля цілі + Label для списку в GUI.
+# Kind: Path (файл/папка) | RegistryKey | RegistryValue (Key, Name) | Service (Name) | Task (Key = TaskPath, Name) |
+#       PathEntry (Scope = Machine|User, Target = запис як у реєстрі) | FirewallRule (Target = програма як у правилі)
+# Default - чи позначати пункт у списку одразу (зламані записи - так; «можливо залишки» - ні)
+function Add-Cleanup($r, $items) {
+    $r.Cleanup = @($items | Where-Object { $_ })
+    $r
+}
+function New-CleanupItem([string]$Kind, [string]$Label, [hashtable]$Fields, [bool]$Default = $true, [long]$Size = 0) {
+    $o = [ordered]@{ Kind = $Kind; Label = $Label; Default = $Default; Size = $Size; Target = ''; Key = ''; Name = ''; Scope = '' }
+    foreach ($k in $Fields.Keys) { $o[$k] = [string]$Fields[$k] }
+    [pscustomobject]$o
+}
 function Unknown([string]$Detail, [switch]$Admin) {
     @{ Status = 'unknown'; Value = '?'; Detail = $Detail; NeedsAdmin = [bool]$Admin }
 }
@@ -290,6 +304,67 @@ function Test-WritableByUsers([string]$Dir) {
     $res
 }
 
+# Встановлені програми з «Програм і компонентів» (усі три розділи реєстру) - потрібні кільком областям
+$script:Installed = $null
+function Get-InstalledApps {
+    if ($null -eq $script:Installed) {
+        $keys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+        $script:Installed = @(foreach ($k in $keys) { Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } })
+    }
+    $script:Installed
+}
+
+# Microsoft.PowerShell.Core\Registry::HKEY_LOCAL_MACHINE\... → HKLM:\... (так шлях зрозуміють і Setup, і людина)
+function ConvertTo-RegDrivePath([string]$PSPath) {
+    $p = $PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::', ''
+    $p -replace '^HKEY_LOCAL_MACHINE\\', 'HKLM:\' -replace '^HKEY_CURRENT_USER\\', 'HKCU:\'
+}
+
+# Чи може звичайна програма створити цей шлях (його немає, але найближча наявна батьківська папка відкрита на запис).
+# Саме так «хвости» стають дірою: служба/завдання/PATH посилаються на місце, куди можна підкласти свій файл
+function Test-CreatableByUsers([string]$Path) {
+    $p = Get-CleanPath $Path
+    if (-not $p -or -not [IO.Path]::IsPathRooted($p)) { return $false }
+    $dir = Split-Path $p
+    while ($dir -and -not (Test-Path -LiteralPath $dir)) { $dir = Split-Path $dir }
+    if (-not $dir) { return $false }
+    Test-WritableByUsers $dir
+}
+
+# Розмір папки з обмеженням часу й кількості файлів: великі папки (кеші ігор) не повинні затримувати сканування
+$script:DirSizeType = $null
+function Get-DirSize([string]$Path, [int]$MaxFiles = 200000) {
+    if (-not $script:DirSizeType) {
+        Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.IO;
+public static class DeadPixelDirSize {
+    public static long Measure(string root, int maxFiles) {
+        long total = 0; int files = 0;
+        var stack = new Stack<string>(); stack.Push(root);
+        while (stack.Count > 0 && files < maxFiles) {
+            var dir = stack.Pop();
+            try {
+                foreach (var f in new DirectoryInfo(dir).EnumerateFileSystemInfos()) {
+                    if ((f.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if ((f.Attributes & FileAttributes.Directory) != 0) stack.Push(f.FullName);
+                    else { total += ((FileInfo)f).Length; files++; }
+                }
+            } catch { }
+        }
+        return total;
+    }
+}
+'@
+        $script:DirSizeType = $true
+    }
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return (Get-Item -LiteralPath $Path -Force).Length }
+    [DeadPixelDirSize]::Measure($Path, $MaxFiles)
+}
+
+function Format-Size([long]$b) {
+    if ($b -ge 1GB) { '{0:N1} ГБ' -f ($b / 1GB) } elseif ($b -ge 1MB) { '{0:N0} МБ' -f ($b / 1MB) } else { '{0:N0} КБ' -f ($b / 1KB) }
+}
+
 # Ноутбук/планшет: від цього залежить, наскільки важливе шифрування диска
 function Test-Portable {
     try { [bool](@((Get-CimInstance Win32_SystemEnclosure).ChassisTypes) | Where-Object { $_ -in 8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32 }) } catch { $false }
@@ -321,6 +396,7 @@ function Invoke-Check($area, $c, [bool]$admin) {
         Id = $c.Id; Area = $area.Id; Title = $c.Title
         Status = $r.Status; Severity = [string]$r.Severity; Value = [string]$r.Value; Detail = [string]$r.Detail
         Evidence = @($r.Evidence | Where-Object { $_ }); Files = @($r.Files | Where-Object { $_ } | Select-Object -Unique)
+        Cleanup = @($r.Cleanup | Where-Object { $_ })
         NeedsAdmin = [bool]$r.NeedsAdmin; Ignored = $false; New = $false
         Explain = [string]$c.Explain; Pros = @($c.Pros | Where-Object { $_ }); Cons = @($c.Cons | Where-Object { $_ })
         Fix = [pscustomobject]@{
@@ -352,7 +428,8 @@ function Get-Grade([int]$score) {
 function Read-IgnoreList {
     $f = Join-Path (Get-DataDir) 'ignore.json'
     if (-not (Test-Path $f)) { return @() }
-    try { @(Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { @() }
+    # ConvertFrom-Json у PowerShell 5.1 віддає JSON-масив одним об'єктом - розгортаємо
+    try { @((Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json) | ForEach-Object { $_ }) } catch { @() }
 }
 
 function Write-IgnoreList([string[]]$ids) {

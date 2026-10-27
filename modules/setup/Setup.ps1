@@ -23,6 +23,10 @@ param(
     [switch]$List,
     [switch]$Apply,
     [switch]$Revert,
+    [string]$Cleanup,    # JSON-файл зі списком хвостів (від Аудиту) → перенести в карантин
+    [switch]$Quarantine, # список сесій карантину
+    [string]$Restore,    # відновити сесію карантину
+    [string]$Purge,      # остаточно видалити сесію (через 30 днів)
     [string]$OutFile   # машинний режим для GUI: результат як JSON у файл, без виводу в консоль
 )
 
@@ -50,6 +54,9 @@ function Find-Backup([string]$name) {
 function Test-Admin {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
+
+# Карантин для хвостів програм (-Cleanup / -Quarantine / -Restore / -Purge)
+. (Join-Path $PSScriptRoot 'Quarantine.ps1')
 
 # ---------------------------------------------------------------- рецепти та профілі
 
@@ -391,6 +398,21 @@ function Show-Menu {
         }
         catch { Write-Host $_.Exception.Message -ForegroundColor Red }
     }
+}
+
+# Карантин: окремий режим, результат - той самий контракт { Error; ... } через -OutFile або текстом у консоль
+if ($Cleanup -or $Quarantine -or $Restore -or $Purge) {
+    try {
+        $out = if ($Cleanup) { Invoke-Cleanup $Cleanup } elseif ($Restore) { Restore-Quarantine $Restore } elseif ($Purge) { Remove-QuarantineSession $Purge } else { Get-QuarantineList }
+    } catch { $out = [pscustomobject]@{ Error = $_.Exception.Message; Items = @(); Sessions = @() } }
+    if ($OutFile) { ConvertTo-Json -InputObject $out -Depth 8 | Set-Content -Encoding UTF8 $OutFile; exit 0 }
+    if ($out.Error) { Write-Host $out.Error -ForegroundColor Red; exit 255 }
+    if ($Quarantine) {
+        if ($out.Sessions) { $out.Sessions | Format-Table Id, AgeDays, Count, @{ n = 'MB'; e = { [int]($_.Size / 1MB) } }, Restored -AutoSize | Out-Host }
+        else { Write-Host "Карантин порожній ($($out.Root))." }
+    }
+    foreach ($i in @($out.Items | Where-Object { $_ })) { Write-Host ('  [{0,-8}] {1}  {2}' -f $i.Status, $i.Label, $i.Message) }
+    exit 0
 }
 
 if (@($Apply, $Revert, $List | Where-Object { $_ }).Count -gt 1) { throw 'Вкажіть лише одне з -List, -Apply, -Revert' }

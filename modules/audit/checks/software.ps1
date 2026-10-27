@@ -39,15 +39,6 @@ function ConvertFrom-WingetTable([string]$text) {
 # Програми, де застаріла версія - пряма діра: браузери, архіватори, месенджери, засоби віддаленого доступу, рантайми
 $script:SensitiveIds = '(?i)^(Google\.Chrome|Mozilla\.(Firefox|Thunderbird)|Microsoft\.Edge|Brave\.|Opera\.|Vivaldi|7zip|RARLab|Oracle\.|EclipseAdoptium|Amazon\.Corretto|Microsoft\.OpenJDK|Adobe\.Acrobat|VideoLAN\.VLC|Zoom\.|Notepad\+\+|PuTTY|WinSCP|OpenJS\.NodeJS|Python\.Python|Git\.Git|Telegram\.|OpenWhisperSystems\.Signal|Discord\.|TheDocumentFoundation|KeePass|DominikReichl|TeamViewer|AnyDesk|Mobatek|qBittorrent|PostgreSQL\.PostgreSQL|Microsoft\.DotNet\.|Session\.Session|Microsoft\.PowerShell|Microsoft\.OpenSSH|Valve\.Steam)'
 
-$script:Installed = $null
-function Get-InstalledApps {
-    if ($null -eq $script:Installed) {
-        $keys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
-        $script:Installed = @(foreach ($k in $keys) { Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } })
-    }
-    $script:Installed
-}
-
 # Кінець підтримки за назвою встановленої програми → @{ Label; End; Sev } або $null. Джерело - сторінки Lifecycle виробників.
 function Get-EolInfo([string]$name) {
     if ($name -match '^Python (\d+)\.(\d+)\.\d+') {

@@ -38,12 +38,27 @@ namespace DeadPixel
     // ---------------------------------------------------------------- JSON-контракт Audit.ps1
 
     class FixInfo { public string Recipe { get; set; } public string Open { get; set; } public List<string> Steps { get; set; } }
+    // Хвіст, який можна перенести в карантин (поля - як у New-CleanupItem в Audit.ps1; Setup.ps1 -Cleanup читає їх назад)
+    class CleanupItem
+    {
+        public string Kind { get; set; } public string Label { get; set; } public bool Default { get; set; } public long Size { get; set; }
+        public string Target { get; set; } public string Key { get; set; } public string Name { get; set; } public string Scope { get; set; }
+    }
+    class CleanupOutcome { public string Label { get; set; } public string Status { get; set; } public string Message { get; set; } }
+    class CleanupResult { public string Error { get; set; } public string Session { get; set; } public List<CleanupOutcome> Items { get; set; } }
+    class QuarantineSession
+    {
+        public string Id { get; set; } public string Time { get; set; } public int AgeDays { get; set; } public int Count { get; set; }
+        public long Size { get; set; } public bool Restored { get; set; } public bool CanPurge { get; set; } public List<string> Labels { get; set; }
+    }
+    class QuarantineList { public string Error { get; set; } public string Root { get; set; } public int Days { get; set; } public List<QuarantineSession> Sessions { get; set; } }
     class CheckResult
     {
         public string Id { get; set; } public string Area { get; set; } public string Title { get; set; }
         public string Status { get; set; } public string Severity { get; set; } public string Value { get; set; } public string Detail { get; set; }
         public List<string> Evidence { get; set; } public List<string> Files { get; set; } public bool NeedsAdmin { get; set; } public bool Ignored { get; set; }
         public bool New { get; set; }
+        public List<CleanupItem> Cleanup { get; set; }
         public string Explain { get; set; } public List<string> Pros { get; set; } public List<string> Cons { get; set; }
         public FixInfo Fix { get; set; }
         public bool IsIssue { get { return Status == "issue"; } }
@@ -72,7 +87,7 @@ namespace DeadPixel
         readonly FlowLayoutPanel areaBar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Padding = new Padding(0, 4, 0, 6) };
         readonly ListView list;
         readonly RichTextBox details = new RichTextBox { ReadOnly = true, BorderStyle = BorderStyle.None, Tag = "surface", DetectUrls = false, ScrollBars = RichTextBoxScrollBars.Vertical };
-        readonly Button btnScan, btnScanAdmin, btnSchedule, btnHtml, btnSetup, btnFix, btnOpen, btnDefender, btnIgnore;
+        readonly Button btnScan, btnScanAdmin, btnSchedule, btnHtml, btnQuarantine, btnSetup, btnFix, btnOpen, btnDefender, btnCleanup, btnIgnore;
         readonly Label status = new Label { AutoSize = true, Padding = new Padding(6, 7, 0, 0), Tag = "muted" };
 
         public AuditForm(string check)
@@ -92,6 +107,7 @@ namespace DeadPixel
             btnScanAdmin = Ui.Btn("Сканувати з правами", (s, e) => Scan(true));
             btnSchedule = Ui.Btn("Розклад…", (s, e) => EditSchedule());
             btnHtml = Ui.Btn("Звіт HTML", (s, e) => ExportHtml());
+            btnQuarantine = Ui.Btn("Карантин…", (s, e) => ShowQuarantine());
             btnSetup = Ui.Btn("Сетап ПК…", (s, e) => OpenSetup(null));
             var scoreBox = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Dock = DockStyle.Left };
             var gradeBox = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
@@ -100,7 +116,7 @@ namespace DeadPixel
             scoreBox.Controls.Add(score);
             scoreBox.Controls.Add(gradeBox);
             var actions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Dock = DockStyle.Right, Padding = new Padding(0, 14, 0, 0) };
-            actions.Controls.AddRange(new Control[] { btnScanAdmin, btnScan, btnSchedule, btnHtml, btnSetup });
+            actions.Controls.AddRange(new Control[] { btnScanAdmin, btnScan, btnSchedule, btnHtml, btnQuarantine, btnSetup });
             var header = new Panel { Dock = DockStyle.Top, Height = 70 };
             header.Controls.Add(scoreBox);
             header.Controls.Add(actions);
@@ -112,9 +128,10 @@ namespace DeadPixel
             btnFix = Ui.Btn("Виправити…", (s, e) => { var r = Selected; if (r != null) OpenSetup(r.Fix.Recipe); });
             btnOpen = Ui.Btn("Відкрити в Windows", (s, e) => { var r = Selected; if (r != null) TryOpen(r.Fix.Open); });
             btnDefender = Ui.Btn("Перевірити Defender'ом", (s, e) => { var r = Selected; if (r != null) ScanFiles(r.Files); });
+            btnCleanup = Ui.Btn("Прибрати…", (s, e) => { var r = Selected; if (r != null) CleanUp(r); });
             btnIgnore = Ui.Btn("Ігнорувати", (s, e) => ToggleIgnore());
             var detailBar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(0, 6, 0, 0), WrapContents = false };
-            detailBar.Controls.AddRange(new Control[] { btnFix, btnOpen, btnDefender, btnIgnore });
+            detailBar.Controls.AddRange(new Control[] { btnFix, btnCleanup, btnOpen, btnDefender, btnIgnore });
             var right = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6, 0, 0, 0) };
             right.Controls.Add(Ui.Card(details, new Padding(12, 10, 8, 8)));
             right.Controls.Add(detailBar);
@@ -175,6 +192,7 @@ namespace DeadPixel
             {
                 if (x.Evidence == null) x.Evidence = new List<string>();
                 if (x.Files == null) x.Files = new List<string>();
+                if (x.Cleanup == null) x.Cleanup = new List<CleanupItem>();
                 if (x.Pros == null) x.Pros = new List<string>();
                 if (x.Cons == null) x.Cons = new List<string>();
                 if (x.Fix == null) x.Fix = new FixInfo();
@@ -323,9 +341,10 @@ namespace DeadPixel
             btnFix.Visible = r != null && !string.IsNullOrEmpty(r.Fix.Recipe);
             btnOpen.Visible = r != null && !string.IsNullOrEmpty(r.Fix.Open);
             btnDefender.Visible = r != null && r.Files.Count > 0;
+            btnCleanup.Visible = r != null && r.Cleanup.Count > 0 && !r.Ignored;
             btnIgnore.Visible = r != null && (r.IsIssue || r.Status == "info" || r.Ignored);
             if (r != null) btnIgnore.Text = r.Ignored ? "Не ігнорувати" : "Ігнорувати";
-            btnFix.Enabled = btnOpen.Enabled = btnDefender.Enabled = btnIgnore.Enabled = !busy;
+            btnFix.Enabled = btnOpen.Enabled = btnDefender.Enabled = btnCleanup.Enabled = btnIgnore.Enabled = !busy;
             if (r == null)
             {
                 Add(report == null ? "Натисніть «Сканувати», щоб перевірити систему." : "Виберіть перевірку зліва.", theme.Muted, false, 10f);
@@ -351,6 +370,8 @@ namespace DeadPixel
                 fixLines.Add("«Відкрити в Windows» — відповідне вікно налаштувань.");
             if (r.Files.Count > 0)
                 fixLines.Insert(0, "«Перевірити Defender'ом» — перевірка підозрілих файлів (" + r.Files.Count + "); нічого не видаляє, лише повідомляє результат.");
+            if (r.Cleanup.Count > 0)
+                fixLines.Insert(0, "«Прибрати…» — виберіть, що перенести в карантин: файли переносяться, записи зберігаються, тож усе можна відновити («Карантин…»). Остаточно видалити можна через 30 днів.");
             if ((r.IsIssue || r.Status == "info") && fixLines.Count > 0) { Heading("Як виправити"); Bullets(fixLines, theme.Fg, "→  "); }
             details.SelectionStart = 0;
             details.ScrollToCaret();
@@ -501,6 +522,148 @@ namespace DeadPixel
             });
         }
 
+        // ================================================================ хвости: прибирання і карантин (рушій — Setup.ps1)
+
+        const string SetupScript = @"..\setup\Setup.ps1";
+
+        static string SizeText(long b)
+        {
+            return b >= 1L << 30 ? (b / (double)(1L << 30)).ToString("0.0") + " ГБ" : b >= 1L << 20 ? (b >> 20) + " МБ" : b > 0 ? Math.Max(1, b >> 10) + " КБ" : "";
+        }
+
+        Form NewDialog(string title, int w, int h)
+        {
+            var f = new Form { Text = title, StartPosition = FormStartPosition.CenterParent, Font = Font, AutoScaleMode = AutoScaleMode.Dpi,
+                               AutoScaleDimensions = new SizeF(96f, 96f), ClientSize = new Size(w, h), ShowInTaskbar = false, MinimizeBox = false,
+                               Icon = Icon, MinimumSize = new Size(560, 380) };
+            f.Load += (s, e) => { theme.Apply(f); theme.ApplyTitleBar(f); };
+            return f;
+        }
+
+        // Список того, що можна прибрати: позначено те, що точно зламане; «можливі залишки» — ні
+        void CleanUp(CheckResult r)
+        {
+            using (var dlg = NewDialog("Прибрати: " + r.Title, 760, 520))
+            {
+                var info = new Label { Dock = DockStyle.Top, Height = 64, Padding = new Padding(12, 10, 12, 0), Tag = "muted",
+                    Text = "Позначене буде перенесено в карантин: файли й папки — у data\\quarantine, записи реєстру, завдання й правила брандмауера — зберігаються для відновлення. " +
+                           "Повернути все можна кнопкою «Карантин…». Потрібні права адміністратора (UAC)." };
+                var list = new CheckedListBox { Dock = DockStyle.Fill, CheckOnClick = true, BorderStyle = BorderStyle.None, IntegralHeight = false, HorizontalScrollbar = true };
+                foreach (var it in r.Cleanup) list.Items.Add(it.Label, it.Default);
+                var total = new Label { AutoSize = true, Padding = new Padding(4, 8, 0, 0), Tag = "muted" };
+                Action recount = () =>
+                {
+                    long size = 0; int n = 0;
+                    for (int i = 0; i < list.Items.Count; i++) if (list.GetItemChecked(i)) { n++; size += r.Cleanup[i].Size; }
+                    total.Text = "Вибрано: " + n + (size > 0 ? ", " + SizeText(size) : "");
+                };
+                list.ItemCheck += (s, e) => BeginInvoke(recount);   // ItemCheck приходить до зміни позначки
+                var all = Ui.Btn("Усі", (s, e) => { for (int i = 0; i < list.Items.Count; i++) list.SetItemChecked(i, true); recount(); });
+                var none = Ui.Btn("Жодного", (s, e) => { for (int i = 0; i < list.Items.Count; i++) list.SetItemChecked(i, false); recount(); });
+                var go = new Button { Text = "Перенести в карантин", DialogResult = DialogResult.OK, AutoSize = true, Height = 30, Padding = new Padding(10, 2, 10, 2) };
+                var cancel = new Button { Text = "Скасувати", DialogResult = DialogResult.Cancel, AutoSize = true, Height = 30, Padding = new Padding(10, 2, 10, 2), Margin = new Padding(8, 0, 0, 0) };
+                var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(12, 8, 12, 6), WrapContents = false };
+                bar.Controls.AddRange(new Control[] { all, none, total });
+                var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, Padding = new Padding(0, 8, 12, 6) };
+                right.Controls.AddRange(new Control[] { go, cancel });
+                var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
+                bottom.Controls.Add(bar);
+                bottom.Controls.Add(right);
+                var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 0) };
+                body.Controls.Add(Ui.Card(list, new Padding(6)));
+                dlg.Controls.Add(body);
+                dlg.Controls.Add(bottom);
+                dlg.Controls.Add(info);
+                dlg.AcceptButton = go; dlg.CancelButton = cancel;
+                dlg.Shown += (s, e) => recount();
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                var chosen = new List<CleanupItem>();
+                for (int i = 0; i < list.Items.Count; i++) if (list.GetItemChecked(i)) chosen.Add(r.Cleanup[i]);
+                if (chosen.Count == 0) return;
+                var tmp = Path.Combine(Path.GetTempPath(), "deadpixel-cleanup-" + Guid.NewGuid().ToString("N") + ".json");
+                File.WriteAllText(tmp, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(chosen), new UTF8Encoding(false));
+                RunAsync("Переношу в карантин: " + chosen.Count + "…", () =>
+                {
+                    try { return ModuleHost.RunScript<CleanupResult>(SetupScript, "-Cleanup \"" + tmp + "\"", true); }
+                    finally { try { File.Delete(tmp); } catch { } }
+                }, res =>
+                {
+                    var cr = (CleanupResult)res;
+                    if (cr.Error != null) { SetStatus(cr.Error, theme.Danger); return; }
+                    var items = cr.Items ?? new List<CleanupOutcome>();
+                    int moved = items.Count(x => x.Status == "MOVED"), skipped = items.Count - moved;
+                    SetStatus("У карантині: " + moved + (skipped > 0 ? ", пропущено: " + skipped : "") + ". Повернути — «Карантин…».", skipped > 0 ? theme.Warn : ModuleHost.Ok(theme));
+                    if (skipped > 0)
+                        MessageBox.Show(this, string.Join("\n", items.Where(x => x.Status != "MOVED").Select(x => "— " + x.Label + ": " + x.Message)),
+                            "DEADPIXEL — пропущено", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    Scan(false);
+                });
+            }
+        }
+
+        void ShowQuarantine()
+        {
+            using (var dlg = NewDialog("Карантин", 820, 460))
+            {
+                var list = Ui.List(() => theme, 1, "Дата", 130, "Що", 420, "Розмір", 90, "Стан", 140);
+                var info = new Label { Dock = DockStyle.Top, Height = 44, Padding = new Padding(12, 10, 12, 0), Tag = "muted" };
+                QuarantineList data = null;
+                Action load = () =>
+                {
+                    UseWaitCursor = dlg.UseWaitCursor = true;
+                    try { data = ModuleHost.RunScript<QuarantineList>(SetupScript, "-Quarantine", false); }
+                    catch (Exception ex) { data = new QuarantineList { Error = ex.Message }; }
+                    finally { UseWaitCursor = dlg.UseWaitCursor = false; }
+                    list.Items.Clear();
+                    if (data.Error != null) { info.Text = data.Error; return; }
+                    info.Text = "Сесії прибирання. «Відновити» повертає все на місце. «Видалити назавжди» стає доступним через " + data.Days +
+                                " днів — час помітити, якщо щось перестало працювати. Папка: " + data.Root;
+                    foreach (var s in data.Sessions ?? new List<QuarantineSession>())
+                    {
+                        DateTime t; DateTime.TryParse(s.Time, out t);
+                        var what = s.Count + " шт.: " + string.Join("; ", (s.Labels ?? new List<string>()).Take(3)) + ((s.Labels ?? new List<string>()).Count > 3 ? "…" : "");
+                        var state = s.Restored ? "відновлено" : s.CanPurge ? "можна видалити" : "ще " + Math.Max(1, data.Days - s.AgeDays) + " дн.";
+                        list.Items.Add(new ListViewItem(new[] { t.ToString("dd.MM.yyyy HH:mm"), what, SizeText(s.Size), state }) { Tag = s, ToolTipText = string.Join("\n", s.Labels ?? new List<string>()) });
+                    }
+                };
+                Func<QuarantineSession> sel = () => list.SelectedItems.Count == 0 ? null : (QuarantineSession)list.SelectedItems[0].Tag;
+                Action<string, string> act = (verb, id) =>
+                {
+                    UseWaitCursor = dlg.UseWaitCursor = true;
+                    CleanupResult res;
+                    try { res = ModuleHost.RunScript<CleanupResult>(SetupScript, verb + " \"" + id + "\"", true); }
+                    catch (Win32Exception) { res = new CleanupResult { Error = "Скасовано: права адміністратора не надано." }; }
+                    catch (Exception ex) { res = new CleanupResult { Error = ex.Message }; }
+                    finally { UseWaitCursor = dlg.UseWaitCursor = false; }
+                    var items = res.Items ?? new List<CleanupOutcome>();
+                    var msg = res.Error ?? (items.Count == 0 ? "Готово." : string.Join("\n", items.Select(x => (x.Status == "RESTORED" ? "✓ " : "✕ ") + x.Label + (string.IsNullOrEmpty(x.Message) ? "" : " — " + x.Message))));
+                    MessageBox.Show(dlg, msg, "DEADPIXEL — карантин", MessageBoxButtons.OK, res.Error != null || items.Any(x => x.Status == "FAIL") ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+                    load();
+                };
+                var restore = Ui.Btn("Відновити", (s, e) => { var q = sel(); if (q != null && !q.Restored) act("-Restore", q.Id); });
+                var purge = Ui.Btn("Видалити назавжди", (s, e) =>
+                {
+                    var q = sel();
+                    if (q == null || !q.CanPurge) return;
+                    if (MessageBox.Show(dlg, "Остаточно видалити " + q.Count + " шт. (" + SizeText(q.Size) + ")? Відновити буде неможливо.", "DEADPIXEL",
+                                        MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK) act("-Purge", q.Id);
+                });
+                var folder = Ui.Btn("Відкрити папку", (s, e) => { if (data != null && data.Root != null) TryOpen(data.Root); });
+                list.SelectedIndexChanged += (s, e) => { var q = sel(); restore.Enabled = q != null && !q.Restored; purge.Enabled = q != null && q.CanPurge; };
+                restore.Enabled = purge.Enabled = false;
+                var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(12, 8, 12, 6), WrapContents = false };
+                bar.Controls.AddRange(new Control[] { restore, purge, folder });
+                var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 6, 12, 0) };
+                body.Controls.Add(Ui.Card(list));
+                dlg.Controls.Add(body);
+                dlg.Controls.Add(bar);
+                dlg.Controls.Add(info);
+                dlg.Shown += (s, e) => { if (theme.Dark) SetWindowTheme(list.Handle, "DarkMode_ItemsView", null); load(); };
+                dlg.ShowDialog(this);
+            }
+        }
+
         // Розклад — завдання Планувальника з найвищими правами (бачить усі процеси), тому зміна потребує UAC
         void EditSchedule()
         {
@@ -587,8 +750,8 @@ namespace DeadPixel
 
         void UpdateBusy()
         {
-            btnScan.Enabled = btnScanAdmin.Enabled = btnSchedule.Enabled = btnHtml.Enabled = !busy;
-            btnFix.Enabled = btnOpen.Enabled = btnDefender.Enabled = btnIgnore.Enabled = !busy;
+            btnScan.Enabled = btnScanAdmin.Enabled = btnSchedule.Enabled = btnHtml.Enabled = btnQuarantine.Enabled = !busy;
+            btnFix.Enabled = btnOpen.Enabled = btnDefender.Enabled = btnCleanup.Enabled = btnIgnore.Enabled = !busy;
             UseWaitCursor = busy;
         }
 
