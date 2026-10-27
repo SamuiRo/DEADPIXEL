@@ -39,13 +39,17 @@ namespace DeadPixel
             if (args.Length >= 2 && args[0] == "--analyze") { DumpAnalyzer.Run(args[1]); return; }
             if (args.Length >= 1 && args[0] == "--smart") { DiskMonitor.WriteSmartCache(); return; }
             if (args.Length >= 2 && args[0] == "--copydumps") { DiagPack.CopyMinidumps(args[1]); return; }
+            if (args.Length >= 1 && args[0] == "--shortcuts") { Shortcuts.Set(Shortcuts.Desktop, true); Shortcuts.Set(Shortcuts.StartMenu, true); return; }
 
             bool created;
             var mutex = new Mutex(true, "DeadPixel_SingleInstance", out created);
-            if (!created) { MessageBox.Show("DEADPIXEL вже запущено — іконка в треї.", "DEADPIXEL"); return; }
+            // Повторний запуск (ярлик, автозапуск) лише просить уже запущений екземпляр показати панель
+            var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "DeadPixel_Show");
+            if (!created) { showSignal.Set(); return; }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             var app = new TrayApp();
+            app.ListenForShow(showSignal);
             if (args.Contains("--show") || app.Settings.ShowOnStart) app.ShowDashboard(null);
             else if (args.Contains("--settings")) app.ShowDashboard("Налаштування");
             var page = args.FirstOrDefault(a => a.StartsWith("--page="));

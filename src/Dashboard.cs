@@ -259,6 +259,8 @@ namespace DeadPixel
             var autostart = Check(t, "Запускати разом із Windows", s.Autostart, v => { s.Autostart = v; });
             Check(t, "Відкривати панель під час запуску", s.ShowOnStart, v => { s.ShowOnStart = v; s.Save(); });
             Combo(t, "Тема", new[] { "Системна", "Світла", "Темна" }, new[] { "system", "light", "dark" }, s.Theme, v => { s.Theme = v; s.Save(); });
+            ShortcutCheck(t, "Ярлик на робочому столі", Shortcuts.Desktop);
+            ShortcutCheck(t, "Ярлик у меню «Пуск»", Shortcuts.StartMenu);
 
             Heading(t, "Запис чорної скриньки");
             Combo(t, "Інтервал запису", new[] { "1 с", "2 с", "5 с", "10 с" }, new[] { "1", "2", "5", "10" }, s.IntervalSec.ToString(),
@@ -303,6 +305,18 @@ namespace DeadPixel
             loadingSettings = false;
             scroll.Controls.Add(t);
             return scroll;
+        }
+
+        // Стан ярлика читається з диска: користувач міг видалити його вручну
+        void ShortcutCheck(TableLayoutPanel t, string text, string lnk)
+        {
+            CheckBox c = null;
+            c = Check(t, text, Shortcuts.Exists(lnk), v =>
+            {
+                try { Shortcuts.Set(lnk, v); }
+                catch (Exception ex) { MessageBox.Show(this, "Не вдалося змінити ярлик: " + ex.Message, "DEADPIXEL"); }
+                loadingSettings = true; c.Checked = Shortcuts.Exists(lnk); loadingSettings = false;
+            });
         }
 
         static void Heading(TableLayoutPanel t, string text)

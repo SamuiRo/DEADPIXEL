@@ -99,6 +99,7 @@ namespace DeadPixel
         // ---------------------------------------------------------- GPU (nvidia-smi у режимі потоку)
         void SmiLoop()
         {
+            bool found = true;
             try
             {
                 var info = RunOnce("nvidia-smi", "--query-gpu=name,driver_version --format=csv,noheader").Split(',');
@@ -106,7 +107,7 @@ namespace DeadPixel
                 var probe = RunOnce("nvidia-smi", "--query-gpu=clocks_event_reasons.active --format=csv,noheader");
                 if (!probe.StartsWith("0x")) GpuQuery = GpuQuery.Replace("clocks_event_reasons", "clocks_throttle_reasons");
             }
-            catch { Status = "nvidia-smi не знайдено (не NVIDIA або драйвер без nvidia-smi) — пишу лише CPU"; }
+            catch { found = false; Status = "nvidia-smi не знайдено (не NVIDIA або драйвер без nvidia-smi) — пишу лише CPU"; }
             while (!stopping)
             {
                 try
@@ -114,16 +115,23 @@ namespace DeadPixel
                     smiInterval = settings.IntervalSec;
                     var psi = new ProcessStartInfo("nvidia-smi", "--query-gpu=" + GpuQuery + " --format=csv,noheader,nounits -lms " + (smiInterval * 1000))
                     { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true, StandardOutputEncoding = Encoding.UTF8 };
-                    smi = Process.Start(psi);
-                    string line;
-                    while (!stopping && (line = smi.StandardOutput.ReadLine()) != null)
+                    using (smi = Process.Start(psi))
                     {
-                        var p = line.Split(',');
-                        if (p.Length >= 10) gpuCells = p.Select(x => x.Trim()).ToArray();
+                        found = true;
+                        Native.KillWithUs(smi);
+                        string line;
+                        while (!stopping && (line = smi.StandardOutput.ReadLine()) != null)
+                        {
+                            var p = line.Split(',');
+                            if (p.Length >= 10) gpuCells = p.Select(x => x.Trim()).ToArray();
+                        }
                     }
                 }
-                catch (Exception ex) { Status = "nvidia-smi: " + ex.Message; gpuCells = null; }
-                if (!stopping && smiInterval == settings.IntervalSec) Thread.Sleep(5000);
+                catch (Exception ex) { found = false; Status = "nvidia-smi: " + ex.Message; }
+                if (stopping || smiInterval != settings.IntervalSec) continue; // перезапуск із новим інтервалом
+                gpuCells = null; // не видаємо застарілі дані GPU за свіжі, поки nvidia-smi не запрацює знову
+                // Без NVIDIA не шукаємо nvidia-smi кожні 5 с: перевіряємо раз на 5 хв (раптом драйвер поставили)
+                Thread.Sleep(found ? 5000 : 300000);
             }
         }
 
@@ -202,7 +210,8 @@ namespace DeadPixel
             }
             Last = s;
             Write(s);
-            try { TrackProcesses(s); } catch { }
+            // Знімок усіх процесів — найдорожча частина тіку, тож не частіше ніж раз на ~4 с
+            if (++procTick * settings.IntervalSec >= 4) { procTick = 0; try { TrackProcesses(s); } catch { } }
             try { Stalls.Sample(s.Time); } catch { }
             Status = g != null ? "запис іде" : "запис іде (без даних GPU)";
         }
@@ -253,6 +262,7 @@ namespace DeadPixel
         class Tracked { public string Name; public long MaxWs; }
         readonly Dictionary<int, Tracked> heavy = new Dictionary<int, Tracked>();
         bool procsPrimed;
+        int procTick = 100; // перший тік одразу знімає список процесів
         string lastFg = "";
         FileStream pfs;
         string pfsDate;
@@ -409,6 +419,7 @@ namespace DeadPixel
             if ((v & 0x40) != 0) r.Add("HW THERMAL");
             if ((v & 0x80) != 0) r.Add("POWER BRAKE");
             if ((v & 0x100) != 0) r.Add("DisplayClk");
+            if ((v & ~0x1FFL) != 0) r.Add("інше 0x" + (v & ~0x1FFL).ToString("X")); // нові біти драйвера — без них плитка була б порожня
             return string.Join(", ", r);
         }
 
@@ -514,6 +525,7 @@ namespace DeadPixel
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
         [DllImport("kernel32.dll")] public static extern ulong GetTickCount64();
+        [DllImport("psapi.dll")] public static extern bool EmptyWorkingSet(IntPtr process);
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
         public class MEMORYSTATUSEX
@@ -531,6 +543,14 @@ namespace DeadPixel
             try { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return (int)pid; } catch { return 0; }
         }
 
+        [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr h, uint flags, StringBuilder name, ref uint size);
+        const uint ProcessQueryLimited = 0x1000;
+        static uint fgPid;
+        static string fgName = "";
+
+        // Назва без Process.GetProcessById: у .NET Framework ProcessName робить знімок усіх процесів системи
         public static string ForegroundProcess()
         {
             try
@@ -538,9 +558,57 @@ namespace DeadPixel
                 uint pid;
                 GetWindowThreadProcessId(GetForegroundWindow(), out pid);
                 if (pid == 0) return "";
-                using (var p = Process.GetProcessById((int)pid)) return p.ProcessName;
+                if (pid == fgPid) return fgName;
+                var h = OpenProcess(ProcessQueryLimited, false, pid);
+                if (h == IntPtr.Zero) return "";
+                try
+                {
+                    var sb = new StringBuilder(1024);
+                    uint size = (uint)sb.Capacity;
+                    if (!QueryFullProcessImageName(h, 0, sb, ref size)) return "";
+                    fgPid = pid;
+                    return fgName = Path.GetFileNameWithoutExtension(sb.ToString());
+                }
+                finally { CloseHandle(h); }
             }
             catch { return ""; }
+        }
+
+        // ---------------------------------------------------------- дочірні процеси вмирають разом з нами
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObject(IntPtr attrs, string name);
+        [DllImport("kernel32.dll")] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION info, int size);
+        [DllImport("kernel32.dll")] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        {
+            public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass, SchedulingClass;
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount, ReadTransferCount, WriteTransferCount, OtherTransferCount;
+            public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+        }
+
+        static IntPtr job;
+
+        // Якщо DEADPIXEL впаде або його вб'ють, система сама закриє nvidia-smi (інакше він працює вічно)
+        public static void KillWithUs(Process p)
+        {
+            try
+            {
+                if (job == IntPtr.Zero)
+                {
+                    var j = CreateJobObject(IntPtr.Zero, null);
+                    var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION { LimitFlags = 0x2000 }; // KILL_ON_JOB_CLOSE
+                    if (!SetInformationJobObject(j, 9, ref info, Marshal.SizeOf(info))) { CloseHandle(j); return; }
+                    job = j;
+                }
+                AssignProcessToJobObject(job, p.Handle);
+            }
+            catch { }
         }
     }
 }

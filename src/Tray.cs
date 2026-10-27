@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -24,7 +23,7 @@ namespace DeadPixel
         readonly SynchronizationContext ui;
         readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 5000 };
         readonly Dictionary<string, DateTime> lastNotify = new Dictionary<string, DateTime>();
-        readonly Icon icoOk, icoWarn, icoAlert;
+        readonly Icon icoOk, icoWarn, icoAlert, icoApp;
         readonly string stateFile = Path.Combine(Program.DataDir, "last-seen-crash.txt");
         Dashboard dash;
         bool unseenCrash;
@@ -35,9 +34,11 @@ namespace DeadPixel
         {
             ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             Sampler = new Sampler(Settings);
-            icoOk = MakeIcon(Color.FromArgb(46, 160, 67));
-            icoWarn = MakeIcon(Color.FromArgb(230, 160, 0));
-            icoAlert = MakeIcon(Color.FromArgb(215, 45, 45));
+            int traySize = SystemInformation.SmallIconSize.Width;
+            icoOk = LoadIcon("DeadPixel.Icon", traySize);
+            icoWarn = LoadIcon("DeadPixel.Icon.Warning", traySize);
+            icoAlert = LoadIcon("DeadPixel.Icon.Alert", traySize);
+            icoApp = LoadIcon("DeadPixel.Icon", 0);
 
             BuildMenu();
             tray.ContextMenuStrip = menu;
@@ -218,9 +219,19 @@ namespace DeadPixel
             UpdateTray();
         }
 
+        // Без окремого потоку: очікування бере на себе пул потоків
+        public void ListenForShow(EventWaitHandle signal)
+        {
+            ThreadPool.RegisterWaitForSingleObject(signal, (st, timedOut) => ui.Post(_ => ShowDashboard(null), null), null, Timeout.Infinite, false);
+        }
+
         public void ShowDashboard(string page)
         {
-            if (dash == null || dash.IsDisposed) dash = new Dashboard(this);
+            if (dash == null || dash.IsDisposed)
+            {
+                dash = new Dashboard(this);
+                dash.FormClosed += (s, e) => ui.Post(_ => TrimMemory(), null);
+            }
             dash.Show();
             if (dash.WindowState == FormWindowState.Minimized) dash.WindowState = FormWindowState.Normal;
             if (page != null) dash.SelectPage(page);
@@ -259,31 +270,37 @@ namespace DeadPixel
             try { File.WriteAllText(stateFile, t.Ticks.ToString()); } catch { }
         }
 
-        static Icon MakeIcon(Color c)
+        // Після закриття панелі повертаємо пам'ять системі: у фоні трей живе лише зі збором даних
+        static void TrimMemory()
         {
-            using (var bmp = new Bitmap(32, 32))
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            using (var self = Process.GetCurrentProcess()) Native.EmptyWorkingSet(self.Handle);
+        }
+
+        // size = 0 — усі кадри: вікно саме бере 16/20/24 для заголовка і 32/48 для панелі задач
+        static Icon LoadIcon(string resource, int size)
+        {
+            using (var stream = typeof(TrayApp).Assembly.GetManifestResourceStream(resource))
+            using (var icon = size > 0 ? new Icon(stream, size, size) : new Icon(stream))
             {
-                using (var g = Graphics.FromImage(bmp))
-                {
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    using (var b = new SolidBrush(c)) g.FillEllipse(b, 2, 2, 28, 28);
-                    using (var pen = new Pen(Color.White, 3f) { LineJoin = LineJoin.Round })
-                        g.DrawLines(pen, new[] { new Point(6, 17), new Point(11, 17), new Point(14, 9), new Point(18, 24), new Point(21, 15), new Point(26, 15) });
-                }
-                var h = bmp.GetHicon();
-                var ico = (Icon)Icon.FromHandle(h).Clone();
-                Native.DestroyIcon(h);
-                return ico;
+                return (Icon)icon.Clone();
             }
         }
 
-        public Icon AppIcon { get { return icoOk; } }
+        public Icon AppIcon { get { return icoApp; } }
 
         protected override void ExitThreadCore()
         {
             tray.Visible = false;
             Sampler.Stop();
             if (dash != null && !dash.IsDisposed) dash.Close();
+            tray.Dispose();
+            icoOk.Dispose();
+            icoWarn.Dispose();
+            icoAlert.Dispose();
+            icoApp.Dispose();
             base.ExitThreadCore();
         }
     }

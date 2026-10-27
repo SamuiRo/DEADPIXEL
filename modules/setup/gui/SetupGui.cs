@@ -878,7 +878,7 @@ namespace DeadPixel
             Size = new Size(1220, Math.Min(860, Screen.PrimaryScreen.WorkingArea.Height - 40));
             MinimumSize = new Size(940, 600);
             StartPosition = FormStartPosition.CenterScreen;
-            Icon = MakeIcon(theme.Accent);
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
             items = MakeList("Стан", 90, "Налаштування", 330, "Зараз", 170, "Треба", 170);
             items.ShowGroups = true;
@@ -1480,26 +1480,7 @@ namespace DeadPixel
             return b;
         }
 
-        [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr h);
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd, string app, string idList);
-
-        static Icon MakeIcon(Color c)
-        {
-            using (var bmp = new Bitmap(32, 32))
-            {
-                using (var g = Graphics.FromImage(bmp))
-                {
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    using (var b = new SolidBrush(c)) g.FillEllipse(b, 2, 2, 28, 28);
-                    using (var pen = new Pen(Color.White, 3.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
-                        g.DrawLines(pen, new[] { new Point(9, 16), new Point(14, 21), new Point(23, 11) });
-                }
-                var h = bmp.GetHicon();
-                var ico = (Icon)Icon.FromHandle(h).Clone();
-                DestroyIcon(h);
-                return ico;
-            }
-        }
     }
 
     // Дерево без горизонтальної прокрутки: довгі назви обрізаються, повна назва — у заголовку справа
