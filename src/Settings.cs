@@ -11,6 +11,7 @@ namespace DeadPixel
     class Settings
     {
         public string Theme = "system";      // system | light | dark
+        public string Language = "system";   // system | uk | en (див. L.cs)
         public bool ShowOnStart = false;
         public int IntervalSec = 2;
         public int RetentionDays = 14;
@@ -34,6 +35,8 @@ namespace DeadPixel
             var s = new Settings();
             try
             {
+                // Налаштування від версії, що була лише українською (без рядка Language), лишають українську
+                if (File.Exists(s.path) && !File.ReadAllLines(s.path).Any(l => l.StartsWith("Language="))) s.Language = "uk";
                 if (File.Exists(s.path))
                     foreach (var line in File.ReadAllLines(s.path))
                     {

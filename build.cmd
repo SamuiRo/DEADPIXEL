@@ -21,7 +21,7 @@ set INFO=%~dp0obj\AssemblyInfo.cs
 
 :: Module GUIs: share the theme with the tray app and modules\common with each other
 set MODREFS=/r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:System.Web.Extensions.dll
-set MODCOMMON="%INFO%" "%~dp0src\Theme.cs" "%~dp0modules\common\*.cs"
+set MODCOMMON="%INFO%" "%~dp0src\Theme.cs" "%~dp0src\L.cs" "%~dp0modules\common\*.cs"
 
 "%CSC%" %COMMON% /out:"%~dp0modules\setup\SetupGui.exe" %MODREFS% %MODCOMMON% "%~dp0modules\setup\gui\*.cs" || exit /b 1
 "%CSC%" %COMMON% /out:"%~dp0modules\audit\AuditGui.exe" %MODREFS% %MODCOMMON% "%~dp0modules\audit\gui\*.cs" || exit /b 1

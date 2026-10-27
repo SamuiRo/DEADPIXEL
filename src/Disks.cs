@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Eventing.Reader;
@@ -24,7 +24,7 @@ namespace DeadPixel
         public long Temp = -1, PowerOnHours = -1, Reallocated = -1, Pending = -1, Uncorrectable = -1, Crc = -1,
                     StartStop = -1, LoadCycles = -1, Wear = -1, SpinRetry = -1, ReadLatencyMax = -1;
         public bool IsHdd { get { return Media == "HDD"; } }
-        public string Label { get { return "Диск " + Number + (Letters != "" ? " (" + Letters + ")" : "") ; } }
+        public string Label { get { return L.T("Диск ", "Disk ") + Number + (Letters != "" ? " (" + Letters + ")" : "") ; } }
     }
 
     class DiskEvent
@@ -86,7 +86,7 @@ namespace DeadPixel
                 if (stuck)
                 {
                     if (!c.Start.HasValue) c.Start = lastSample == DateTime.MinValue ? now : lastSample;
-                    live.Add(string.Format("Диск {0} ({1}) не відповідає {2:0} с", c.Disk, c.Letters, (now - c.Start.Value).TotalSeconds));
+                    live.Add(string.Format(L.T("Диск {0} ({1}) не відповідає {2:0} с", "Disk {0} ({1}) not responding for {2:0} s"), c.Disk, c.Letters, (now - c.Start.Value).TotalSeconds));
                 }
                 else if (c.Start.HasValue)
                 {
@@ -94,7 +94,7 @@ namespace DeadPixel
                     if (secs >= 4)
                     {
                         var ev = new DiskEvent { Time = c.Start.Value, Kind = "stall", Disk = c.Disk, Letter = c.Letters, Seconds = secs,
-                            Text = string.Format("Диск {0} ({1}) не відповідав {2:0} с — запити стояли в черзі без жодної завершеної операції", c.Disk, c.Letters, secs) };
+                            Text = string.Format(L.T("Диск {0} ({1}) не відповідав {2:0} с — запити стояли в черзі без жодної завершеної операції", "Disk {0} ({1}) did not respond for {2:0} s — requests were queued with no operation completing"), c.Disk, c.Letters, secs) };
                         Write(ev, now);
                         var h = StallDetected;
                         if (h != null) h(ev);
@@ -139,7 +139,7 @@ namespace DeadPixel
                 double.TryParse(c[2], NumberStyles.Float, CultureInfo.InvariantCulture, out secs);
                 int.TryParse(c[3], out disk);
                 res.Add(new DiskEvent { Time = t, Kind = "stall", Disk = disk, Letter = c[4], Seconds = secs,
-                    Text = string.Format("не відповідав {0:0} с (виявлено DEADPIXEL)", secs) });
+                    Text = string.Format(L.T("не відповідав {0:0} с (виявлено DEADPIXEL)", "did not respond for {0:0} s (detected by DEADPIXEL)"), secs) });
             }
             return res;
         }
@@ -311,22 +311,22 @@ namespace DeadPixel
                                 e.Kind = "reset";
                                 var pm = Regex.Match(props.Length > 0 ? props[0] : "", @"RaidPort(\d+)");
                                 e.Port = pm.Success ? "RaidPort" + pm.Groups[1].Value : prov;
-                                e.Text = "Скидання диска контролером (" + e.Port + ")";
+                                e.Text = L.T("Скидання диска контролером (", "Disk reset by the controller (") + e.Port + ")";
                             }
                             else if (prov == "disk")
                             {
                                 e.Kind = rec.Id == 153 ? "retry" : "error";
                                 var m = Regex.Match(props.Length > 0 ? props[0] : "", @"Harddisk(\d+)");
                                 if (m.Success) e.Disk = int.Parse(m.Groups[1].Value);
-                                e.Text = rec.Id == 153 ? "Операцію повторено (диск не відповів вчасно)" : rec.Id == 51 ? "Помилка під час підкачки сторінок" :
-                                         rec.Id == 7 ? "Пошкоджений блок" : rec.Id == 11 ? "Помилка контролера" : "Апаратна помилка вводу-виводу";
+                                e.Text = rec.Id == 153 ? L.T("Операцію повторено (диск не відповів вчасно)", "Operation retried (the disk did not respond in time)") : rec.Id == 51 ? L.T("Помилка під час підкачки сторінок", "Error during paging") :
+                                         rec.Id == 7 ? L.T("Пошкоджений блок", "Bad block") : rec.Id == 11 ? L.T("Помилка контролера", "Controller error") : L.T("Апаратна помилка вводу-виводу", "Hardware I/O error");
                             }
                             else
                             {
                                 e.Kind = rec.Id == 50 || rec.Id == 140 ? "lostwrite" : "error";
                                 var path = props.FirstOrDefault(p => Regex.IsMatch(p, @"^[A-Za-z]:")) ?? "";
                                 e.Letter = path.Length >= 2 ? path.Substring(0, 2).ToUpperInvariant() : "";
-                                e.Text = (rec.Id == 50 || rec.Id == 140 ? "Не вдалося записати дані (втрата запису): " : rec.Id == 98 ? "Том потребує перевірки (chkdsk): " : "Пошкодження файлової системи: ") + path;
+                                e.Text = (rec.Id == 50 || rec.Id == 140 ? L.T("Не вдалося записати дані (втрата запису): ", "Data could not be written (lost write): ") : rec.Id == 98 ? L.T("Том потребує перевірки (chkdsk): ", "The volume needs checking (chkdsk): ") : L.T("Пошкодження файлової системи: ", "File system corruption: ")) + path;
                                 var d = disks.FirstOrDefault(x => e.Letter != "" && x.Letters.Contains(e.Letter));
                                 if (d != null) e.Disk = d.Number;
                             }
@@ -361,16 +361,16 @@ namespace DeadPixel
                 {
                     var d = disks.FirstOrDefault(x => x.Number == e.Disk);
                     e.LaneKey = "d" + e.Disk;
-                    e.LaneName = d != null ? d.Label + " " + d.Media : "Диск " + e.Disk + " (відсутній)";
+                    e.LaneName = d != null ? d.Label + " " + d.Media : string.Format(L.T("Диск {0} (відсутній)", "Disk {0} (absent)"), e.Disk);
                 }
                 else if (e.Kind == "reset")
                 {
                     List<int> nums;
                     e.LaneKey = "p" + e.Port;
-                    e.LaneName = e.Port + (portDisks.TryGetValue(e.Port, out nums) ? " → диски " + string.Join(", ", nums) : "");
+                    e.LaneName = e.Port + (portDisks.TryGetValue(e.Port, out nums) ? L.T(" → диски ", " → disks ") + string.Join(", ", nums) : "");
                 }
-                else if (e.Letter != "") { e.LaneKey = "l" + e.Letter; e.LaneName = e.Letter + " (відсутній)"; }
-                else { e.LaneKey = "x"; e.LaneName = "Невідомий диск"; }
+                else if (e.Letter != "") { e.LaneKey = "l" + e.Letter; e.LaneName = e.Letter + L.T(" (відсутній)", " (absent)"); }
+                else { e.LaneKey = "x"; e.LaneName = L.T("Невідомий диск", "Unknown disk"); }
             }
         }
 
@@ -378,60 +378,60 @@ namespace DeadPixel
         {
             var sb = new StringBuilder();
             var now = DateTime.Now;
-            sb.AppendLine(string.Format("Зведення за {0} дн.:", days));
+            sb.AppendLine(string.Format(L.T("Зведення за {0} дн.:", "Summary for {0} days:"), days));
             foreach (var d in disks)
             {
                 var ev = events.Where(e => e.Disk == d.Number).ToList();
                 var stalls = ev.Where(e => e.Kind == "stall").ToList();
-                sb.AppendLine(string.Format("  {0,-22} скидань: {1,3} (24 год: {2}) · повторів: {3,3} · зависань: {4,3}{5} · помилок: {6} · втрат запису: {7}",
+                sb.AppendLine(string.Format(L.T("  {0,-22} скидань: {1,3} (24 год: {2}) · повторів: {3,3} · зависань: {4,3}{5} · помилок: {6} · втрат запису: {7}", "  {0,-22} resets: {1,3} (24 h: {2}) · retries: {3,3} · stalls: {4,3}{5} · errors: {6} · lost writes: {7}"),
                     d.Label, ev.Count(e => e.Kind == "reset"), ev.Count(e => e.Kind == "reset" && e.Time > now.AddDays(-1)), ev.Count(e => e.Kind == "retry"),
-                    stalls.Count, stalls.Count > 0 ? string.Format(" (найдовше {0:0} с)", stalls.Max(s => s.Seconds)) : "",
+                    stalls.Count, stalls.Count > 0 ? string.Format(L.T(" (найдовше {0:0} с)", " (longest {0:0} s)"), stalls.Max(s => s.Seconds)) : "",
                     ev.Count(e => e.Kind == "error"), ev.Count(e => e.Kind == "lostwrite")));
             }
             var ports = events.Where(e => e.Kind == "reset" && e.Disk < 0).GroupBy(e => e.LaneName).ToList();
             foreach (var g in ports)
-                sb.AppendLine(string.Format("  {0,-22} скидань без визначеного диска: {1} (Windows не записала, якого саме)", g.Key, g.Count()));
+                sb.AppendLine(string.Format(L.T("  {0,-22} скидань без визначеного диска: {1} (Windows не записала, якого саме)", "  {0,-22} resets without an identified disk: {1} (Windows did not record which one)"), g.Key, g.Count()));
             var orphan = events.Where(e => e.Kind != "reset" && (e.Disk < 0 || disks.All(d => d.Number != e.Disk))).ToList();
             if (orphan.Count > 0)
             {
-                sb.AppendLine("  Диски, яких зараз немає в системі (зовнішні/USB):");
+                sb.AppendLine(L.T("  Диски, яких зараз немає в системі (зовнішні/USB):", "  Disks not currently present (external/USB):"));
                 foreach (var g in orphan.GroupBy(e => e.LaneName))
-                    sb.AppendLine(string.Format("    {0,-22} подій: {1} (останнє {2:yyyy-MM-dd HH:mm})", g.Key, g.Count(), g.Max(e => e.Time)));
+                    sb.AppendLine(string.Format(L.T("    {0,-22} подій: {1} (останнє {2:yyyy-MM-dd HH:mm})", "    {0,-22} events: {1} (last {2:yyyy-MM-dd HH:mm})"), g.Key, g.Count(), g.Max(e => e.Time)));
             }
             var lost = events.Where(e => e.Kind == "lostwrite").ToList();
             if (lost.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("УВАГА — втрачені записи (файли могли пошкодитися):");
+                sb.AppendLine(L.T("УВАГА — втрачені записи (файли могли пошкодитися):", "WARNING — lost writes (files may be damaged):"));
                 foreach (var g in lost.GroupBy(e => e.Text).Take(15)) sb.AppendLine(string.Format("  {0:yyyy-MM-dd HH:mm}  {1}", g.Max(e => e.Time), g.Key));
             }
 
             sb.AppendLine();
-            sb.AppendLine("Налаштування живлення дисків:");
+            sb.AppendLine(L.T("Налаштування живлення дисків:", "Disk power settings:"));
             var idle = SystemInfo.PowerCfg("SUB_DISK DISKIDLE");
             var lpm = SystemInfo.PowerCfg("SUB_DISK 0b2d69d7-a2a1-449c-9680-f91c70521c60");
-            sb.AppendLine("  Зупинка HDD при простої: " + (idle < 0 ? "?" : idle == 0 ? "ніколи" : (idle / 60) + " хв"));
-            sb.AppendLine("  Енергозбереження з'єднання SATA (AHCI LPM): " + (lpm < 0 ? "за замовчуванням (налаштування приховане)" : lpm == 0 ? "вимкнено (Active)" : lpm == 1 ? "HIPM" : lpm == 2 ? "HIPM+DIPM" : lpm == 3 ? "DIPM" : "найнижче споживання"));
+            sb.AppendLine(L.T("  Зупинка HDD при простої: ", "  HDD idle spin-down: ") + (idle < 0 ? "?" : idle == 0 ? L.T("ніколи", "never") : (idle / 60) + L.T(" хв", " min")));
+            sb.AppendLine(L.T("  Енергозбереження з'єднання SATA (AHCI LPM): ", "  SATA link power management (AHCI LPM): ") + (lpm < 0 ? L.T("за замовчуванням (налаштування приховане)", "default (setting hidden)") : lpm == 0 ? L.T("вимкнено (Active)", "off (Active)") : lpm == 1 ? "HIPM" : lpm == 2 ? "HIPM+DIPM" : lpm == 3 ? "DIPM" : L.T("найнижче споживання", "lowest power")));
 
             var tips = new List<string>();
             int resets = events.Count(e => e.Kind == "reset");
             var hddResets = disks.Where(d => d.IsHdd && events.Any(e => e.Kind == "reset" && e.Disk == d.Number)).ToList();
-            if (resets > 0 && lpm != 0) tips.Add("Є скидання дисків, а енергозбереження SATA не вимкнене — вимкніть AHCI LPM (команди в чаті/README).");
-            if (resets > 0 && idle > 0 && hddResets.Count > 0) tips.Add("HDD засинають через " + (idle / 60) + " хв — пробудження може не встигати за тайм-аутом. Збільште час або вимкніть зупинку.");
-            if (hddResets.Count >= 2) tips.Add("Скидання на кількох HDD одночасно → імовірна спільна причина: контролер, драйвер, живлення (спільний кабель SATA). Спробуйте інший порт/контролер і окремі кабелі живлення.");
+            if (resets > 0 && lpm != 0) tips.Add(L.T("Є скидання дисків, а енергозбереження SATA не вимкнене — вимкніть AHCI LPM (рецепт «Диски без енергозбереження» у Сетапі ПК).", "There are disk resets while SATA power saving is on — disable AHCI LPM (the «Disks without power saving» recipe in PC setup)."));
+            if (resets > 0 && idle > 0 && hddResets.Count > 0) tips.Add(string.Format(L.T("HDD засинають через {0} хв — пробудження може не встигати за тайм-аутом. Збільште час або вимкніть зупинку.", "HDDs spin down after {0} min — waking up may not beat the timeout. Increase the time or disable spin-down."), idle / 60));
+            if (hddResets.Count >= 2) tips.Add(L.T("Скидання на кількох HDD одночасно → імовірна спільна причина: контролер, драйвер, живлення (спільний кабель SATA). Спробуйте інший порт/контролер і окремі кабелі живлення.", "Resets on several HDDs at once → likely a common cause: controller, driver or power (shared SATA power cable). Try another port/controller and separate power cables."));
             foreach (var d in disks)
             {
-                if (d.Reallocated > 0 || d.Pending > 0 || d.Uncorrectable > 0) tips.Add(d.Label + ": є пошкоджені/нестабільні сектори — зробіть резервну копію, диск деградує.");
-                if (d.Crc > 0) tips.Add(d.Label + ": помилки передачі по кабелю SATA (CRC = " + d.Crc + ") — замініть кабель даних SATA.");
-                if (d.IsHdd && d.LoadCycles > 250000) tips.Add(d.Label + ": " + d.LoadCycles.ToString("N0") + " паркувань головок — близько до ресурсу (~300 000 для настільних дисків).");
-                if (d.IsHdd && d.Temp > 50) tips.Add(d.Label + ": висока температура " + d.Temp + " °C.");
-                if (d.Wear > 80) tips.Add(d.Label + ": знос SSD " + d.Wear + "%.");
-                if (d.Health != "Healthy" && d.Health != "?") tips.Add(d.Label + ": Windows повідомляє стан «" + d.Health + "».");
+                if (d.Reallocated > 0 || d.Pending > 0 || d.Uncorrectable > 0) tips.Add(d.Label + L.T(": є пошкоджені/нестабільні сектори — зробіть резервну копію, диск деградує.", ": has bad/unstable sectors — make a backup, the disk is degrading."));
+                if (d.Crc > 0) tips.Add(d.Label + string.Format(L.T(": помилки передачі по кабелю SATA (CRC = {0}) — замініть кабель даних SATA.", ": SATA cable transfer errors (CRC = {0}) — replace the SATA data cable."), d.Crc));
+                if (d.IsHdd && d.LoadCycles > 250000) tips.Add(d.Label + ": " + d.LoadCycles.ToString("N0") + L.T(" паркувань головок — близько до ресурсу (~300 000 для настільних дисків).", " head load cycles — close to the rated limit (~300,000 for desktop drives)."));
+                if (d.IsHdd && d.Temp > 50) tips.Add(d.Label + L.T(": висока температура ", ": high temperature ") + d.Temp + " °C.");
+                if (d.Wear > 80) tips.Add(d.Label + L.T(": знос SSD ", ": SSD wear ") + d.Wear + "%.");
+                if (d.Health != "Healthy" && d.Health != "?") tips.Add(d.Label + string.Format(L.T(": Windows повідомляє стан «{0}».", ": Windows reports health \"{0}\"."), d.Health));
             }
-            if (SmartTime == DateTime.MinValue) tips.Add("SMART ще не зчитано — натисніть «Оновити SMART».");
+            if (SmartTime == DateTime.MinValue) tips.Add(L.T("SMART ще не зчитано — натисніть «Оновити SMART».", "SMART has not been read yet — click \"Refresh SMART\"."));
             sb.AppendLine();
-            sb.AppendLine("Рекомендації:");
-            if (tips.Count == 0) sb.AppendLine("  Проблем не виявлено.");
+            sb.AppendLine(L.T("Рекомендації:", "Recommendations:"));
+            if (tips.Count == 0) sb.AppendLine(L.T("  Проблем не виявлено.", "  No problems found."));
             foreach (var t in tips) sb.AppendLine("  • " + t);
             return sb.ToString().Replace("\r\n", "\n").Replace("\n", "\r\n");
         }
@@ -496,7 +496,7 @@ namespace DeadPixel
             float lx = 12;
             foreach (var k in new[] { "reset", "retry", "stall", "error", "lostwrite" })
             {
-                var name = k == "reset" ? "● скидання" : k == "retry" ? "● повтор" : k == "stall" ? "▬ зависання (тривалість)" : k == "error" ? "● помилка" : "● втрата запису";
+                var name = k == "reset" ? L.T("● скидання", "● reset") : k == "retry" ? L.T("● повтор", "● retry") : k == "stall" ? L.T("▬ зависання (тривалість)", "▬ stall (duration)") : k == "error" ? L.T("● помилка", "● error") : L.T("● втрата запису", "● lost write");
                 TextRenderer.DrawText(g, name, small, new Point((int)lx, 6), KindColor(k, t));
                 lx += TextRenderer.MeasureText(name, small).Width + 10;
             }
@@ -556,10 +556,10 @@ namespace DeadPixel
                     float h = gr.Count() / (float)max * (histH - 12);
                     g.FillRectangle(b, x1 + 1, hist.Bottom - h, Math.Max(2, x2 - x1 - 2), h);
                 }
-            TextRenderer.DrawText(g, (days <= 1 ? "проблем за годину" : "проблем за день") + " (макс " + max + ")", small, new Point(8, hist.Top + 4), t.Muted);
+            TextRenderer.DrawText(g, (days <= 1 ? L.T("проблем за годину", "problems per hour") : L.T("проблем за день", "problems per day")) + L.T(" (макс ", " (max ") + max + ")", small, new Point(8, hist.Top + 4), t.Muted);
 
             if (lanes.Count == 0 || visible.Count == 0)
-                TextRenderer.DrawText(g, "За обраний період проблем із дисками не зафіксовано.", Font, area, t.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(g, L.T("За обраний період проблем із дисками не зафіксовано.", "No disk problems recorded in the selected period."), Font, area, t.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 
             // підказка
             if (mouseX >= area.Left && mouseX <= area.Right && mouseY >= area.Top && mouseY <= hist.Bottom)
@@ -569,7 +569,7 @@ namespace DeadPixel
                 var near = visible.Where(ev => Math.Abs((ev.Time - time).TotalSeconds) <= tol.TotalSeconds).OrderBy(ev => ev.Time).Take(8).ToList();
                 using (var pen = new Pen(t.Muted) { DashStyle = DashStyle.Dot }) g.DrawLine(pen, mouseX, area.Top, mouseX, hist.Bottom);
                 var lines = new List<string> { time.ToString("yyyy-MM-dd HH:mm") };
-                lines.AddRange(near.Select(ev => string.Format("{0:HH:mm:ss} {1}: {2}", ev.Time, ev.Disk >= 0 ? "Диск " + ev.Disk : ev.Letter, ev.Text.Length > 80 ? ev.Text.Substring(0, 80) + "…" : ev.Text)));
+                lines.AddRange(near.Select(ev => string.Format("{0:HH:mm:ss} {1}: {2}", ev.Time, ev.Disk >= 0 ? L.T("Диск ", "Disk ") + ev.Disk : ev.Letter, ev.Text.Length > 80 ? ev.Text.Substring(0, 80) + "…" : ev.Text)));
                 var text = string.Join("\n", lines);
                 var sz = TextRenderer.MeasureText(text, small);
                 int bx = mouseX + 12 + sz.Width + 12 > Width ? mouseX - sz.Width - 20 : mouseX + 12;

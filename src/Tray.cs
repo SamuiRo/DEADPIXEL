@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -16,7 +16,7 @@ namespace DeadPixel
         public readonly EventMonitor Events = new EventMonitor();
         public List<CrashInfo> Crashes = new List<CrashInfo>();
         public List<ChangeItem> Changes = new List<ChangeItem>();
-        public string PatternText = "Аналізую…";
+        public string PatternText = L.T("Аналізую…", "Analyzing…");
 
         readonly NotifyIcon tray = new NotifyIcon();
         readonly ContextMenuStrip menu = new ContextMenuStrip();
@@ -66,7 +66,7 @@ namespace DeadPixel
             {
                 Events.AddExternal(new EvItem { Time = st.Time, Category = "Диск", Source = "DEADPIXEL", Id = 0, Level = 3, Text = st.Text });
                 if (Settings.NotifyDisk && st.Seconds >= 10)
-                    Notify("stall:" + st.Disk, TimeSpan.FromMinutes(10), "Диск не відповідав " + st.Seconds.ToString("0") + " с", st.Text, ToolTipIcon.Warning);
+                    Notify("stall:" + st.Disk, TimeSpan.FromMinutes(10), string.Format(L.T("Диск не відповідав {0:0} с", "Disk did not respond for {0:0} s"), st.Seconds), st.Text, ToolTipIcon.Warning);
             }, null);
 
             // Початкове сканування у фоні, щоб трей з'явився одразу
@@ -85,17 +85,17 @@ namespace DeadPixel
         void BuildMenu()
         {
             menu.Items.Clear();
-            var open = menu.Items.Add("Відкрити панель", null, (s, e) => ShowDashboard(null));
+            var open = menu.Items.Add(L.T("Відкрити панель", "Open dashboard"), null, (s, e) => ShowDashboard(null));
             open.Font = new Font(menu.Font, FontStyle.Bold);
-            menu.Items.Add("Повний звіт (HTML)", null, (s, e) => RunFullReport());
-            menu.Items.Add("Папка чорної скриньки", null, (s, e) => Open(Program.DataDir));
+            menu.Items.Add(L.T("Повний звіт (HTML)", "Full report (HTML)"), null, (s, e) => RunFullReport());
+            menu.Items.Add(L.T("Папка чорної скриньки", "Black box folder"), null, (s, e) => Open(Program.DataDir));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Аудит системи…", null, (s, e) => RunModule(@"audit\AuditGui.exe"));
-            menu.Items.Add("Сетап ПК (рецепти)…", null, (s, e) => RunModule(@"setup\SetupGui.exe"));
+            menu.Items.Add(L.T("Аудит системи…", "System audit…"), null, (s, e) => RunModule(@"audit\AuditGui.exe"));
+            menu.Items.Add(L.T("Сетап ПК (рецепти)…", "PC setup (recipes)…"), null, (s, e) => RunModule(@"setup\SetupGui.exe"));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Налаштування…", null, (s, e) => ShowDashboard("Налаштування"));
+            menu.Items.Add(L.T("Налаштування…", "Settings…"), null, (s, e) => ShowDashboard("Налаштування"));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Вихід", null, (s, e) => ExitThread());
+            menu.Items.Add(L.T("Вихід", "Exit"), null, (s, e) => ExitThread());
             ApplyMenuTheme();
         }
 
@@ -128,7 +128,7 @@ namespace DeadPixel
             catch { }
             try { CrashAnalyzer.Enrich(crashes, changes, wmiDriver); } catch { }
             string pattern;
-            try { pattern = PatternAnalyzer.Build(crashes, changes); } catch (Exception ex) { pattern = "Помилка аналізу: " + ex.Message; }
+            try { pattern = PatternAnalyzer.Build(crashes, changes); } catch (Exception ex) { pattern = L.T("Помилка аналізу: ", "Analysis error: ") + ex.Message; }
             Changes = changes;
             PatternText = pattern;
             return crashes;
@@ -150,10 +150,10 @@ namespace DeadPixel
                     {
                         var c = fresh[0];
                         var txt = string.Format("{0:dd.MM HH:mm} — {1}{2}", c.Boot, BugChecks.Get(c.Code)[0], c.Driver != "" ? " (" + c.Driver + ")" : "");
-                        if (c.LastFg != "") txt += "\nОстання активна програма: " + c.LastFg;
-                        if (fresh.Count > 1) txt += string.Format("\nНових крашів: {0}", fresh.Count);
+                        if (c.LastFg != "") txt += L.T("\nОстання активна програма: ", "\nLast active app: ") + c.LastFg;
+                        if (fresh.Count > 1) txt += string.Format(L.T("\nНових крашів: {0}", "\nNew crashes: {0}"), fresh.Count);
                         balloonClick = null;
-                        tray.ShowBalloonTip(15000, "Комп'ютер перезавантажився через збій", txt + "\nНатисніть, щоб подивитися деталі.", ToolTipIcon.Error);
+                        tray.ShowBalloonTip(15000, L.T("Комп'ютер перезавантажився через збій", "The PC restarted after a crash"), txt + L.T("\nНатисніть, щоб подивитися деталі.", "\nClick to see the details."), ToolTipIcon.Error);
                     }
                 }
                 else if (fresh.Count > 0) MarkCrashesSeen();
@@ -227,9 +227,9 @@ namespace DeadPixel
 
             balloonClick = () => RunModule(@"audit\AuditGui.exe", "--check \"" + id + "\"");
             var text = (title ?? "") + (string.IsNullOrEmpty(value) ? "" : ": " + value);
-            if (alerts > 1) text += "\nІ ще: " + (alerts - 1);
-            tray.ShowBalloonTip(15000, alerts == 1 ? "Аудит системи: нова серйозна проблема" : "Аудит системи: нових серйозних проблем — " + alerts,
-                text + "\nНатисніть, щоб побачити пояснення і що зробити.", ToolTipIcon.Warning);
+            if (alerts > 1) text += L.T("\nІ ще: ", "\nAnd more: ") + (alerts - 1);
+            tray.ShowBalloonTip(15000, alerts == 1 ? L.T("Аудит системи: нова серйозна проблема", "System audit: new serious finding") : L.T("Аудит системи: нових серйозних проблем — ", "System audit: new serious findings — ") + alerts,
+                text + L.T("\nНатисніть, щоб побачити пояснення і що зробити.", "\nClick to see the explanation and what to do."), ToolTipIcon.Warning);
         }
 
         void OnLiveEvent(EvItem it)
@@ -237,9 +237,9 @@ namespace DeadPixel
             UpdateTray();
             if (!Allowed(it.Category)) return;
             var cooldown = it.Category == "GPU" || it.Category == "WHEA" ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(30);
-            string title = it.Category == "GPU" ? "Проблема з відеодрайвером" : it.Category == "WHEA" ? "Апаратна помилка (WHEA)" :
-                           it.Category == "USB" ? "Збій USB" : it.Category == "Програма" ? "Програма впала" :
-                           it.Category == "CPU" ? "Процесор обмежено" : "Помилка диска";
+            string title = it.Category == "GPU" ? L.T("Проблема з відеодрайвером", "Graphics driver problem") : it.Category == "WHEA" ? L.T("Апаратна помилка (WHEA)", "Hardware error (WHEA)") :
+                           it.Category == "USB" ? L.T("Збій USB", "USB failure") : it.Category == "Програма" ? L.T("Програма впала", "An application crashed") :
+                           it.Category == "CPU" ? L.T("Процесор обмежено", "CPU throttled") : L.T("Помилка диска", "Disk error");
             Notify("ev:" + it.Category, cooldown, title, it.Text, it.Category == "Диск" || it.Category == "Програма" ? ToolTipIcon.Warning : ToolTipIcon.Error);
         }
 
@@ -248,11 +248,11 @@ namespace DeadPixel
             var s = Sampler.Last;
             if (s == null || !Settings.NotifyTemp) return;
             if (!double.IsNaN(s.GpuTemp) && s.GpuTemp >= Settings.GpuTempWarn)
-                Notify("temp:gpu", TimeSpan.FromMinutes(10), "Висока температура GPU", string.Format("{0:0} °C (поріг {1} °C)", s.GpuTemp, Settings.GpuTempWarn), ToolTipIcon.Warning);
+                Notify("temp:gpu", TimeSpan.FromMinutes(10), L.T("Висока температура GPU", "High GPU temperature"), string.Format(L.T("{0:0} °C (поріг {1} °C)", "{0:0} °C (threshold {1} °C)"), s.GpuTemp, Settings.GpuTempWarn), ToolTipIcon.Warning);
             if (!double.IsNaN(s.CpuTemp) && s.CpuTemp >= Settings.CpuTempWarn)
-                Notify("temp:cpu", TimeSpan.FromMinutes(10), "Висока температура CPU", string.Format("{0:0} °C (поріг {1} °C)", s.CpuTemp, Settings.CpuTempWarn), ToolTipIcon.Warning);
+                Notify("temp:cpu", TimeSpan.FromMinutes(10), L.T("Висока температура CPU", "High CPU temperature"), string.Format(L.T("{0:0} °C (поріг {1} °C)", "{0:0} °C (threshold {1} °C)"), s.CpuTemp, Settings.CpuTempWarn), ToolTipIcon.Warning);
             if (Sampler.ReasonsCritical(s.Reasons))
-                Notify("gpu:slowdown", TimeSpan.FromMinutes(10), "GPU примусово сповільнено", Sampler.DecodeReasons(s.Reasons) + " — можлива проблема з живленням або перегрів.", ToolTipIcon.Warning);
+                Notify("gpu:slowdown", TimeSpan.FromMinutes(10), L.T("GPU примусово сповільнено", "GPU forcibly slowed down"), Sampler.DecodeReasons(s.Reasons) + L.T(" — можлива проблема з живленням або перегрів.", " — possible power delivery problem or overheating."), ToolTipIcon.Warning);
         }
 
         void UpdateTray()
@@ -268,8 +268,8 @@ namespace DeadPixel
                 if (!double.IsNaN(s.GpuTemp)) tip += string.Format("\nGPU {0:0}°C {1:0}W {2}", s.GpuTemp, s.GpuPower, s.PState);
                 if (!double.IsNaN(s.CpuPct)) tip += string.Format("\nCPU {0:0}%{1}", s.CpuPct, double.IsNaN(s.CpuTemp) ? "" : string.Format(" {0:0}°C", s.CpuTemp));
             }
-            if (unseenCrash) tip += "\nНовий краш!";
-            else if (recent) tip += "\nЗбої GPU за 24 год";
+            if (unseenCrash) tip += L.T("\nНовий краш!", "\nNew crash!");
+            else if (recent) tip += L.T("\nЗбої GPU за 24 год", "\nGPU failures in 24 h");
             tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip; // .NET Framework обмежує підказку 63 символами
         }
 
@@ -304,7 +304,7 @@ namespace DeadPixel
         {
             var cmd = Path.Combine(Program.BaseDir, "DeadPixel.cmd");
             if (File.Exists(cmd)) Open(cmd);
-            else MessageBox.Show("Не знайдено " + cmd, "DEADPIXEL");
+            else MessageBox.Show(L.T("Не знайдено ", "Not found: ") + cmd, "DEADPIXEL");
         }
 
         // Модулі (modules\) — окремі процеси на вимогу: трей їх лише запускає і нічого не тримає в пам'яті
@@ -313,7 +313,7 @@ namespace DeadPixel
         public static void RunModule(string relPath, string args)
         {
             var path = Path.Combine(Program.BaseDir, "modules", relPath);
-            if (!File.Exists(path)) { MessageBox.Show("Не знайдено модуль " + path, "DEADPIXEL"); return; }
+            if (!File.Exists(path)) { MessageBox.Show(L.T("Не знайдено модуль ", "Module not found: ") + path, "DEADPIXEL"); return; }
             try { Process.Start(new ProcessStartInfo(path, args) { UseShellExecute = true }); }
             catch (Exception ex) { MessageBox.Show(ex.Message, "DEADPIXEL"); }
         }
@@ -354,6 +354,14 @@ namespace DeadPixel
         }
 
         public Icon AppIcon { get { return icoApp; } }
+
+        // Перезапуск (зміна мови): нова копія чекає, доки ця завершиться й звільнить mutex
+        public void Restart()
+        {
+            try { Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--wait-pid " + Process.GetCurrentProcess().Id + " --show")); }
+            catch (Exception ex) { MessageBox.Show(ex.Message, "DEADPIXEL"); return; }
+            ExitThread();
+        }
 
         protected override void ExitThreadCore()
         {

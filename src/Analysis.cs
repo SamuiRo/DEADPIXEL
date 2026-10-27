@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -42,14 +42,14 @@ namespace DeadPixel
             foreach (var c in crashes)
             {
                 // 1. Момент збою: дамп TDR → чорна скринька → (невідомо) час перезавантаження
-                c.Moment = c.Boot; c.MomentSource = "невідомо (взято час перезавантаження)";
+                c.Moment = c.Boot; c.MomentSource = L.T("невідомо (взято час перезавантаження)", "unknown (reboot time used)");
                 var tdr = lkr.Where(x => x.Item1 <= c.Boot && x.Item1 > c.Boot.AddMinutes(-40) && Path.GetFileName(x.Item2).StartsWith("WATCHDOG-"))
                              .OrderByDescending(x => x.Item1).FirstOrDefault();
-                if (tdr != null) { c.Moment = tdr.Item1.AddSeconds(59); c.MomentSource = "дамп зависання GPU (точність до хвилини)"; c.LkrDump = tdr.Item2; }
+                if (tdr != null) { c.Moment = tdr.Item1.AddSeconds(59); c.MomentSource = L.T("дамп зависання GPU (точність до хвилини)", "GPU hang dump (accurate to the minute)"); c.LkrDump = tdr.Item2; }
                 var lastRow = Sampler.ReadBefore(c.Boot, 1);
                 DateTime lt;
                 if (lastRow.Count > 0 && Sampler.TryTime(lastRow[0], out lt) && (tdr == null || Math.Abs((lt - tdr.Item1).TotalMinutes) < 3))
-                { c.Moment = lt; c.MomentSource = "останній запис чорної скриньки (точність ±інтервал запису)"; }
+                { c.Moment = lt; c.MomentSource = L.T("останній запис чорної скриньки (точність ±інтервал запису)", "last black box record (accurate to ± the recording interval)"); }
 
                 // 2. Скільки працювала система
                 var prev = boots.Where(b => b < c.Boot.AddSeconds(-30)).DefaultIfEmpty(DateTime.MinValue).Max();
@@ -68,7 +68,7 @@ namespace DeadPixel
                 var nvAfter = changes.Where(x => x.IsNvidiaDisplay && x.Time > c.Moment).OrderBy(x => x.Time).FirstOrDefault();
                 if (nvBefore != null) c.DriverAtCrash = NvVersion(nvBefore.Version);
                 else if (nvAfter == null) c.DriverAtCrash = currentDriver;
-                else c.DriverAtCrash = "старіший за " + NvVersion(nvAfter.Version);
+                else c.DriverAtCrash = L.T("старіший за ", "older than ") + NvVersion(nvAfter.Version);
             }
         }
 
@@ -99,52 +99,52 @@ namespace DeadPixel
 
         public static string Ago(TimeSpan t)
         {
-            if (t.TotalSeconds < 90) return string.Format("{0:0} с", t.TotalSeconds);
-            if (t.TotalMinutes < 90) return string.Format("{0:0} хв", t.TotalMinutes);
-            if (t.TotalHours < 48) return string.Format("{0} год {1} хв", (int)t.TotalHours, t.Minutes);
-            return string.Format("{0:0} дн", t.TotalDays);
+            if (t.TotalSeconds < 90) return string.Format(L.T("{0:0} с", "{0:0} s"), t.TotalSeconds);
+            if (t.TotalMinutes < 90) return string.Format(L.T("{0:0} хв", "{0:0} min"), t.TotalMinutes);
+            if (t.TotalHours < 48) return string.Format(L.T("{0} год {1} хв", "{0} h {1} min"), (int)t.TotalHours, t.Minutes);
+            return string.Format(L.T("{0:0} дн", "{0:0} d"), t.TotalDays);
         }
 
         public static string Describe(CrashInfo c)
         {
             var bc = BugChecks.Get(c.Code);
             var sb = new StringBuilder();
-            sb.AppendLine("Перезавантаження після збою: " + c.Boot.ToString("yyyy-MM-dd HH:mm:ss"));
-            sb.AppendLine("Момент збою:  " + c.Moment.ToString("yyyy-MM-dd HH:mm:ss") + "  — " + c.MomentSource);
-            sb.AppendLine("Код:          " + (c.Code == 0 ? "— (без синього екрана)" : "0x" + c.Code.ToString("X") + "  " + bc[0]));
-            sb.AppendLine("Що це:        " + bc[1]);
-            if (c.Driver != "") sb.AppendLine("Драйвер:      " + c.Driver);
+            sb.AppendLine(L.T("Перезавантаження після збою: ", "Reboot after the crash: ") + c.Boot.ToString("yyyy-MM-dd HH:mm:ss"));
+            sb.AppendLine(L.T("Момент збою:  ", "Crash time:   ") + c.Moment.ToString("yyyy-MM-dd HH:mm:ss") + "  — " + c.MomentSource);
+            sb.AppendLine(L.T("Код:          ", "Code:         ") + (c.Code == 0 ? L.T("— (без синього екрана)", "— (no blue screen)") : "0x" + c.Code.ToString("X") + "  " + bc[0]));
+            sb.AppendLine(L.T("Що це:        ", "Meaning:      ") + bc[1]);
+            if (c.Driver != "") sb.AppendLine(L.T("Драйвер:      ", "Driver:       ") + c.Driver);
             sb.AppendLine("NVIDIA:       " + c.DriverAtCrash);
-            if (c.Uptime.HasValue) sb.AppendLine("Аптайм:       " + Ago(c.Uptime.Value) + " після запуску системи");
-            if (c.Dump != "") sb.AppendLine("Дамп:         " + c.Dump);
-            if (c.LkrDump != "") sb.AppendLine("Дамп TDR:     " + c.LkrDump);
+            if (c.Uptime.HasValue) sb.AppendLine(L.T("Аптайм:       ", "Uptime:       ") + Ago(c.Uptime.Value) + L.T(" після запуску системи", " after system start"));
+            if (c.Dump != "") sb.AppendLine(L.T("Дамп:         ", "Dump:         ") + c.Dump);
+            if (c.LkrDump != "") sb.AppendLine(L.T("Дамп TDR:     ", "TDR dump:     ") + c.LkrDump);
 
             sb.AppendLine();
-            sb.AppendLine("Обставини:");
+            sb.AppendLine(L.T("Обставини:", "Circumstances:"));
             var s = c.LastSample;
-            if (s == null) sb.AppendLine("  чорна скринька не має даних для цього моменту (DEADPIXEL тоді не працював).");
+            if (s == null) sb.AppendLine(L.T("  чорна скринька не має даних для цього моменту (DEADPIXEL тоді не працював).", "  the black box has no data for this moment (DEADPIXEL was not running then)."));
             else
             {
                 var idle = WasIdle(c);
-                sb.AppendLine(string.Format("  GPU: {0}, {1}% навантаження, {2} W, {3} MHz, {4} °C, обмеження: {5}  → {6}",
+                sb.AppendLine(string.Format(L.T("  GPU: {0}, {1}% навантаження, {2} W, {3} MHz, {4} °C, обмеження: {5}  → {6}", "  GPU: {0}, {1}% load, {2} W, {3} MHz, {4} °C, throttling: {5}  → {6}"),
                     s.PState, F(s.GpuUtil), F(s.GpuPower), F(s.GpuClock), F(s.GpuTemp), Sampler.DecodeReasons(s.Reasons),
-                    idle == true ? "ПРОСТІЙ" : idle == false ? "ПІД НАВАНТАЖЕННЯМ" : "?"));
+                    idle == true ? L.T("ПРОСТІЙ", "IDLE") : idle == false ? L.T("ПІД НАВАНТАЖЕННЯМ", "UNDER LOAD") : "?"));
                 if (!double.IsNaN(s.CpuPct)) sb.AppendLine(string.Format("  CPU: {0}%, {1} MHz{2}, RAM {3}%", F(s.CpuPct), F(s.CpuMhz), double.IsNaN(s.CpuTemp) ? "" : ", " + F(s.CpuTemp) + " °C", F(s.RamPct)));
-                if (s.Fg != "") sb.AppendLine("  Активна програма: " + s.Fg);
+                if (s.Fg != "") sb.AppendLine(L.T("  Активна програма: ", "  Active app: ") + s.Fg);
                 var lastTransition = c.Rows.Where(r => r.Time <= c.Moment).Zip(c.Rows.Where(r => r.Time <= c.Moment).Skip(1), (a, b) => new { a, b })
                                             .LastOrDefault(x => x.a.PState != x.b.PState);
                 if (lastTransition != null)
-                    sb.AppendLine(string.Format("  Остання зміна P-state: {0} → {1} за {2} до збою", lastTransition.a.PState, lastTransition.b.PState, Ago(c.Moment - lastTransition.b.Time)));
+                    sb.AppendLine(string.Format(L.T("  Остання зміна P-state: {0} → {1} за {2} до збою", "  Last P-state change: {0} → {1}, {2} before the crash"), lastTransition.a.PState, lastTransition.b.PState, Ago(c.Moment - lastTransition.b.Time)));
             }
             if (c.LastExit != null)
-                sb.AppendLine(string.Format("  Закрито «{0}» ({1} МБ) за {2} до збою", c.LastExit.Name, c.LastExit.RamMb, Ago(c.Moment - c.LastExit.Time)));
+                sb.AppendLine(string.Format(L.T("  Закрито «{0}» ({1} МБ) за {2} до збою", "  Closed \"{0}\" ({1} MB) {2} before the crash"), c.LastExit.Name, c.LastExit.RamMb, Ago(c.Moment - c.LastExit.Time)));
             else if (c.Procs.Count > 0 || s != null)
-                sb.AppendLine("  Закриття важких програм за 10 хв до збою не було.");
+                sb.AppendLine(L.T("  Закриття важких програм за 10 хв до збою не було.", "  No heavy programs were closed in the 10 minutes before the crash."));
 
             if (c.Events.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("Події Windows за 10 хв до збою:");
+                sb.AppendLine(L.T("Події Windows за 10 хв до збою:", "Windows events in the 10 minutes before the crash:"));
                 foreach (var e in c.Events.OrderBy(e => e.Time))
                     sb.AppendLine(string.Format("  {0:HH:mm:ss} [{1} {2}] {3}", e.Time, e.Source, e.Id, e.Text.Length > 160 ? e.Text.Substring(0, 160) + "…" : e.Text));
             }
@@ -155,14 +155,14 @@ namespace DeadPixel
                 var a = DumpAnalyzer.Load(dump);
                 if (a == null) continue;
                 sb.AppendLine();
-                sb.AppendLine("Аналіз дампу " + Path.GetFileName(dump) + ":");
+                sb.AppendLine(L.T("Аналіз дампу ", "Dump analysis ") + Path.GetFileName(dump) + ":");
                 sb.Append(a.Summary());
             }
 
             if (s != null)
             {
                 sb.AppendLine();
-                sb.AppendLine("Чорна скринька (останні записи):");
+                sb.AppendLine(L.T("Чорна скринька (останні записи):", "Black box (latest records):"));
                 sb.AppendLine("  " + Sampler.Header.Replace(",", " | "));
                 foreach (var l in Sampler.ReadBefore(c.Moment.AddSeconds(1), 20)) sb.AppendLine("  " + l.Replace(",", " | "));
             }
@@ -179,27 +179,27 @@ namespace DeadPixel
         {
             var sb = new StringBuilder();
             var list = crashes.OrderBy(c => c.Moment).ToList();
-            sb.AppendLine(string.Format("Аварійних перезавантажень за 90 днів: {0}", list.Count));
+            sb.AppendLine(string.Format(L.T("Аварійних перезавантажень за 90 днів: {0}", "Unexpected reboots in 90 days: {0}"), list.Count));
             if (list.Count == 0) return sb.ToString();
 
             sb.AppendLine();
-            sb.AppendLine("Типи збоїв:");
+            sb.AppendLine(L.T("Типи збоїв:", "Crash types:"));
             foreach (var g in list.GroupBy(c => c.Code).OrderByDescending(g => g.Count()))
-                sb.AppendLine(string.Format("  {0,-32} ×{1}", g.Key == 0 ? "без BSOD" : BugChecks.Get(g.Key)[0], g.Count()));
+                sb.AppendLine(string.Format("  {0,-32} ×{1}", g.Key == 0 ? L.T("без BSOD", "no BSOD") : BugChecks.Get(g.Key)[0], g.Count()));
             var drv = list.Where(c => c.Driver != "").GroupBy(c => c.Driver).OrderByDescending(g => g.Count()).ToList();
-            if (drv.Count > 0) sb.AppendLine("  Винний драйвер: " + string.Join(", ", drv.Select(g => g.Key + " ×" + g.Count())));
-            sb.AppendLine("  Версія NVIDIA під час крашів: " + string.Join(", ", list.GroupBy(c => c.DriverAtCrash).Select(g => g.Key + " ×" + g.Count())));
+            if (drv.Count > 0) sb.AppendLine(L.T("  Винний драйвер: ", "  Faulting driver: ") + string.Join(", ", drv.Select(g => g.Key + " ×" + g.Count())));
+            sb.AppendLine(L.T("  Версія NVIDIA під час крашів: ", "  NVIDIA version during crashes: ") + string.Join(", ", list.GroupBy(c => c.DriverAtCrash).Select(g => g.Key + " ×" + g.Count())));
 
             sb.AppendLine();
-            sb.AppendLine("Хронологія:");
+            sb.AppendLine(L.T("Хронологія:", "Timeline:"));
             foreach (var c in list)
             {
                 var idle = CrashAnalyzer.WasIdle(c);
-                sb.AppendLine(string.Format("  {0:yyyy-MM-dd HH:mm}  {1,-24} аптайм {2,-10} GPU: {3,-14} {4}",
-                    c.Moment, c.Code == 0 ? "без BSOD" : BugChecks.Get(c.Code)[0],
+                sb.AppendLine(string.Format(L.T("  {0:yyyy-MM-dd HH:mm}  {1,-24} аптайм {2,-10} GPU: {3,-14} {4}", "  {0:yyyy-MM-dd HH:mm}  {1,-24} uptime {2,-10} GPU: {3,-14} {4}"),
+                    c.Moment, c.Code == 0 ? L.T("без BSOD", "no BSOD") : BugChecks.Get(c.Code)[0],
                     c.Uptime.HasValue ? CrashAnalyzer.Ago(c.Uptime.Value) : "?",
-                    idle == true ? "простій" : idle == false ? "навантаження" : "немає даних",
-                    c.LastExit != null ? string.Format("закрито {0} за {1} до", c.LastExit.Name, CrashAnalyzer.Ago(c.Moment - c.LastExit.Time)) : ""));
+                    idle == true ? L.T("простій", "idle") : idle == false ? L.T("навантаження", "load") : L.T("немає даних", "no data"),
+                    c.LastExit != null ? string.Format(L.T("закрито {0} за {1} до", "closed {0} {1} before"), c.LastExit.Name, CrashAnalyzer.Ago(c.Moment - c.LastExit.Time)) : ""));
             }
 
             // Історія відновлених зависань GPU (без BSOD) — показує, як давно проблема тягнеться
@@ -207,7 +207,7 @@ namespace DeadPixel
             if (tdrs.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("Зависання GPU за місяцями (дампи TDR, включно з відновленими без BSOD):");
+                sb.AppendLine(L.T("Зависання GPU за місяцями (дампи TDR, включно з відновленими без BSOD):", "GPU hangs by month (TDR dumps, including those recovered without a BSOD):"));
                 foreach (var g in tdrs.GroupBy(x => x.Item1.ToString("yyyy-MM")))
                     sb.AppendLine(string.Format("  {0}  {1}", g.Key, new string('█', g.Count()) + " " + g.Count()));
             }
@@ -219,15 +219,15 @@ namespace DeadPixel
             int idleCnt = withData.Count(c => CrashAnalyzer.WasIdle(c) == true);
             var withProcs = list.Where(c => c.Procs.Count > 0 || c.LastSample != null).ToList();
             int afterExit = withProcs.Count(c => c.LastExit != null && (c.Moment - c.LastExit.Time).TotalSeconds <= 120);
-            if (gpu * 2 >= list.Count) tips.Add(string.Format("{0} з {1} крашів пов'язані з відеодрайвером NVIDIA — основний підозрюваний GPU/драйвер/живлення GPU.", gpu, list.Count));
-            if (withData.Count >= 2 && idleCnt * 2 > withData.Count) tips.Add(string.Format("{0} з {1} крашів (де є дані) сталися в ПРОСТОЇ — типово для збою при переході GPU в енергозбереження: вимкніть PCIe ASPM, спробуйте «Максимальна продуктивність» у панелі NVIDIA.", idleCnt, withData.Count));
-            if (withData.Count >= 2 && idleCnt * 2 < withData.Count) tips.Add("Більшість крашів під навантаженням — перевірте живлення відеокарти (кабель 12V-2x6, БЖ) і температури.");
-            if (withProcs.Count >= 1 && afterExit * 2 >= withProcs.Count && afterExit > 0) tips.Add(string.Format("{0} з {1} крашів (де є дані) сталися протягом 2 хв після закриття гри/важкої програми.", afterExit, withProcs.Count));
+            if (gpu * 2 >= list.Count) tips.Add(string.Format(L.T("{0} з {1} крашів пов'язані з відеодрайвером NVIDIA — основний підозрюваний GPU/драйвер/живлення GPU.", "{0} of {1} crashes involve the NVIDIA graphics driver — the main suspect is the GPU, its driver or its power delivery."), gpu, list.Count));
+            if (withData.Count >= 2 && idleCnt * 2 > withData.Count) tips.Add(string.Format(L.T("{0} з {1} крашів (де є дані) сталися в ПРОСТОЇ — типово для збою при переході GPU в енергозбереження: вимкніть PCIe ASPM, спробуйте «Максимальна продуктивність» у панелі NVIDIA.", "{0} of {1} crashes (with data) happened at IDLE — typical of a failure when the GPU enters power saving: disable PCIe ASPM and try \"Prefer maximum performance\" in the NVIDIA control panel."), idleCnt, withData.Count));
+            if (withData.Count >= 2 && idleCnt * 2 < withData.Count) tips.Add(L.T("Більшість крашів під навантаженням — перевірте живлення відеокарти (кабель 12V-2x6, БЖ) і температури.", "Most crashes happen under load — check the graphics card power (12V-2x6 cable, PSU) and temperatures."));
+            if (withProcs.Count >= 1 && afterExit * 2 >= withProcs.Count && afterExit > 0) tips.Add(string.Format(L.T("{0} з {1} крашів (де є дані) сталися протягом 2 хв після закриття гри/важкої програми.", "{0} of {1} crashes (with data) happened within 2 minutes after closing a game or heavy program."), afterExit, withProcs.Count));
             var versions = list.Select(c => c.DriverAtCrash).Distinct().ToList();
-            if (versions.Count == 1 && list.Count >= 2) tips.Add("Усі краші на одній версії драйвера NVIDIA (" + versions[0] + "). Оновлення драйвера — перший крок.");
+            if (versions.Count == 1 && list.Count >= 2) tips.Add(string.Format(L.T("Усі краші на одній версії драйвера NVIDIA ({0}). Оновлення драйвера — перший крок.", "All crashes are on one NVIDIA driver version ({0}). Updating the driver is the first step."), versions[0]));
             var shortUp = list.Count(c => c.Uptime.HasValue && c.Uptime.Value.TotalMinutes < 15);
-            if (shortUp >= 2) tips.Add(string.Format("{0} крашів сталися менш ніж за 15 хв після запуску системи.", shortUp));
-            if (withData.Count == 0) tips.Add("Даних чорної скриньки для минулих крашів немає. Після наступного краша тут з'явиться аналіз стану GPU і програм у момент збою.");
+            if (shortUp >= 2) tips.Add(string.Format(L.T("{0} крашів сталися менш ніж за 15 хв після запуску системи.", "{0} crashes happened less than 15 minutes after system start."), shortUp));
+            if (withData.Count == 0) tips.Add(L.T("Даних чорної скриньки для минулих крашів немає. Після наступного краша тут з'явиться аналіз стану GPU і програм у момент збою.", "There is no black box data for past crashes. After the next crash this will show the GPU and program state at the moment of failure."));
 
             // Початок серії і що змінилося перед ним
             CrashInfo seriesStart = list.Last();
@@ -239,13 +239,13 @@ namespace DeadPixel
             var before = changes.Where(x => x.Time <= seriesStart.Moment && x.Time > seriesStart.Moment.AddDays(-7)).OrderByDescending(x => x.Time).ToList();
 
             sb.AppendLine();
-            sb.AppendLine("Висновки:");
-            if (tips.Count == 0) sb.AppendLine("  Явних закономірностей не видно.");
+            sb.AppendLine(L.T("Висновки:", "Conclusions:"));
+            if (tips.Count == 0) sb.AppendLine(L.T("  Явних закономірностей не видно.", "  No clear patterns."));
             foreach (var t in tips) sb.AppendLine("  • " + t);
 
             sb.AppendLine();
-            sb.AppendLine(string.Format("Що змінилося за 7 днів до початку серії крашів ({0:yyyy-MM-dd HH:mm}):", seriesStart.Moment));
-            if (before.Count == 0) sb.AppendLine("  нічого не знайдено (драйвери/оновлення/програми).");
+            sb.AppendLine(string.Format(L.T("Що змінилося за 7 днів до початку серії крашів ({0:yyyy-MM-dd HH:mm}):", "What changed in the 7 days before the crash series began ({0:yyyy-MM-dd HH:mm}):"), seriesStart.Moment));
+            if (before.Count == 0) sb.AppendLine(L.T("  нічого не знайдено (драйвери/оновлення/програми).", "  nothing found (drivers/updates/programs)."));
             foreach (var x in before.Take(25)) sb.AppendLine(string.Format("  {0:yyyy-MM-dd HH:mm}  {1,-18} {2}", x.Time, x.Kind, x.Text));
             return sb.ToString().Replace("\r\n", "\n").Replace("\n", "\r\n");
         }
@@ -254,6 +254,20 @@ namespace DeadPixel
     // ================================================================ історія змін
     class ChangeItem
     {
+        // Kind — внутрішній ключ («Драйвер», «Оновлення Windows», …); підпис — мовою інтерфейсу
+        public static string KindText(string k)
+        {
+            switch (k)
+            {
+                case "Драйвер": return L.T("Драйвер", "Driver");
+                case "Оновлення Windows": return L.T("Оновлення Windows", "Windows update");
+                case "Видалено програму": return L.T("Видалено програму", "Program removed");
+                case "Встановлено програму": return L.T("Встановлено програму", "Program installed");
+                case "КРАШ": return L.T("КРАШ", "CRASH");
+                default: return k;
+            }
+        }
+
         public DateTime Time;
         public string Kind, Text, Inf = "", Version = "";
         public bool IsNvidiaDisplay { get { return Inf.StartsWith("nv_disp", StringComparison.OrdinalIgnoreCase); } }
@@ -344,7 +358,7 @@ namespace DeadPixel
                 bool had = last.TryGetValue(x.Inf, out prev);
                 if (had && prev == x.Version) continue;
                 last[x.Inf] = x.Version;
-                x.Text = Friendly(x.Inf) + " → " + x.Version + (x.IsNvidiaDisplay ? " (NVIDIA " + CrashAnalyzer.NvVersion(x.Version) + ")" : "") + (had ? "  (було " + prev + ")" : "");
+                x.Text = Friendly(x.Inf) + " → " + x.Version + (x.IsNvidiaDisplay ? " (NVIDIA " + CrashAnalyzer.NvVersion(x.Version) + ")" : "") + (had ? L.T("  (було ", "  (was ") + prev + ")" : "");
                 res.Add(x);
             }
             return res;
@@ -352,10 +366,10 @@ namespace DeadPixel
 
         static string Friendly(string inf)
         {
-            if (inf.StartsWith("nv_disp")) return "NVIDIA відеодрайвер (" + inf + ")";
+            if (inf.StartsWith("nv_disp")) return L.T("NVIDIA відеодрайвер (", "NVIDIA graphics driver (") + inf + ")";
             if (inf.StartsWith("nv")) return "NVIDIA (" + inf + ")";
-            if (inf.StartsWith("u0")) return "AMD Radeon, вбудована графіка (" + inf + ")";
-            if (inf.StartsWith("amd")) return "AMD чипсет (" + inf + ")";
+            if (inf.StartsWith("u0")) return L.T("AMD Radeon, вбудована графіка (", "AMD Radeon integrated graphics (") + inf + ")";
+            if (inf.StartsWith("amd")) return L.T("AMD чипсет (", "AMD chipset (") + inf + ")";
             return inf;
         }
     }
@@ -377,10 +391,10 @@ namespace DeadPixel
             }
             if (Stack.Count > 0)
             {
-                sb.AppendLine("  Стек викликів (верхні кадри):");
+                sb.AppendLine(L.T("  Стек викликів (верхні кадри):", "  Call stack (top frames):"));
                 foreach (var l in Stack.Take(10)) sb.AppendLine("    " + l);
             }
-            if (sb.Length == 0) sb.AppendLine("  (не вдалося розібрати вивід — відкрийте повний вивід)");
+            if (sb.Length == 0) sb.AppendLine(L.T("  (не вдалося розібрати вивід — відкрийте повний вивід)", "  (could not parse the output — open the full output)"));
             return sb.ToString();
         }
     }
@@ -427,7 +441,7 @@ namespace DeadPixel
         public static string Start(string dump)
         {
             var cdb = FindCdb(false);
-            if (cdb == null) return "WinDbg не встановлено.";
+            if (cdb == null) return L.T("WinDbg не встановлено.", "WinDbg is not installed.");
             Directory.CreateDirectory(AnalysisDir);
             File.WriteAllText(PendingPath(dump), DateTime.Now.ToString("o"));
             try
@@ -463,7 +477,7 @@ namespace DeadPixel
                     output = task.Result;
                 }
             }
-            catch (Exception ex) { output = "Помилка запуску cdb: " + ex.Message; }
+            catch (Exception ex) { output = L.T("Помилка запуску cdb: ", "Failed to start cdb: ") + ex.Message; }
             File.WriteAllText(ResultPath(dump), output, Encoding.UTF8);
             try { File.Delete(PendingPath(dump)); } catch { }
         }
@@ -512,7 +526,7 @@ namespace DeadPixel
             // На старих збірках Windows 10 / LTSC winget може не бути — тоді відкриваємо сторінку завантаження
             bool hasWinget = File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WindowsApps\winget.exe"));
             if (!hasWinget) { TrayApp.Open("https://aka.ms/windbg/download"); return; }
-            Process.Start(new ProcessStartInfo("cmd.exe", "/k winget install --id Microsoft.WinDbg -e --accept-package-agreements && echo. && echo Готово. Поверніться в DEADPIXEL і натисніть «Аналізувати».") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("cmd.exe", "/k winget install --id Microsoft.WinDbg -e --accept-package-agreements && echo. && echo " + L.T("Готово. Поверніться в DEADPIXEL і натисніть «Аналізувати».", "Done. Go back to DEADPIXEL and click Analyze.")) { UseShellExecute = true });
         }
     }
 
@@ -526,11 +540,11 @@ namespace DeadPixel
             Directory.CreateDirectory(stage);
 
             var sb = new StringBuilder();
-            sb.AppendLine("DEADPIXEL — пакет для діагностики, " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + ", " + Environment.MachineName);
+            sb.AppendLine(L.T("DEADPIXEL — пакет для діагностики, ", "DEADPIXEL — diagnostics package, ") + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + ", " + Environment.MachineName);
             sb.AppendLine(new string('=', 80));
             sb.AppendLine(SystemInfo.Build(app));
             sb.AppendLine(new string('=', 80));
-            sb.AppendLine("ЗАКОНОМІРНОСТІ");
+            sb.AppendLine(L.T("ЗАКОНОМІРНОСТІ", "PATTERNS"));
             sb.AppendLine(app.PatternText);
             foreach (var c in app.Crashes.OrderByDescending(c => c.Boot))
             {
@@ -538,10 +552,10 @@ namespace DeadPixel
                 sb.AppendLine(CrashAnalyzer.Describe(c));
             }
             sb.AppendLine(new string('=', 80));
-            sb.AppendLine("ЗМІНИ (драйвери, оновлення, програми)");
+            sb.AppendLine(L.T("ЗМІНИ (драйвери, оновлення, програми)", "CHANGES (drivers, updates, programs)"));
             foreach (var x in app.Changes) sb.AppendLine(string.Format("{0:yyyy-MM-dd HH:mm}  {1,-20} {2}", x.Time, x.Kind, x.Text));
             sb.AppendLine(new string('=', 80));
-            sb.AppendLine("ПОДІЇ (останні 7 днів)");
+            sb.AppendLine(L.T("ПОДІЇ (останні 7 днів)", "EVENTS (last 7 days)"));
             lock (app.Events.Lock)
                 foreach (var e in app.Events.Items) sb.AppendLine(string.Format("{0:yyyy-MM-dd HH:mm:ss} [{1}] {2} {3}: {4}", e.Time, e.Category, e.Source, e.Id, e.Text));
             File.WriteAllText(Path.Combine(stage, "summary.txt"), sb.ToString(), Encoding.UTF8);
@@ -569,7 +583,7 @@ namespace DeadPixel
                     using (var p = Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--copydumps \"" + miniDir + "\"") { UseShellExecute = true, Verb = "runas" }))
                         p.WaitForExit(60000);
                 }
-                catch { File.WriteAllText(Path.Combine(miniDir, "README.txt"), "Мінідампи не скопійовано: потрібні права адміністратора."); }
+                catch { File.WriteAllText(Path.Combine(miniDir, "README.txt"), L.T("Мінідампи не скопійовано: потрібні права адміністратора.", "Minidumps were not copied: administrator rights are required.")); }
             }
 
             var packs = Directory.CreateDirectory(Path.Combine(Program.DataDir, "packs")).FullName;

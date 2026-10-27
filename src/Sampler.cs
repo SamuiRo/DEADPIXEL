@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -44,7 +44,7 @@ namespace DeadPixel
         readonly List<Sample> samples = new List<Sample>();
         public volatile Sample Last;
         public string GpuName = "GPU", Driver = "?";
-        public volatile string Status = "запуск…";
+        public volatile string Status = L.T("запуск…", "starting…");
         public readonly CpuTempSource CpuTemp = new CpuTempSource();
         public readonly StallDetector Stalls = new StallDetector();
 
@@ -107,7 +107,7 @@ namespace DeadPixel
                 var probe = RunOnce("nvidia-smi", "--query-gpu=clocks_event_reasons.active --format=csv,noheader");
                 if (!probe.StartsWith("0x")) GpuQuery = GpuQuery.Replace("clocks_event_reasons", "clocks_throttle_reasons");
             }
-            catch { found = false; Status = "nvidia-smi не знайдено (не NVIDIA або драйвер без nvidia-smi) — пишу лише CPU"; }
+            catch { found = false; Status = L.T("nvidia-smi не знайдено (не NVIDIA або драйвер без nvidia-smi) — пишу лише CPU", "nvidia-smi not found (not NVIDIA or a driver without nvidia-smi) — recording CPU only"); }
             while (!stopping)
             {
                 try
@@ -145,7 +145,7 @@ namespace DeadPixel
             long next = 0;
             while (!stopping)
             {
-                try { Tick(); } catch (Exception ex) { Status = "помилка: " + ex.Message; }
+                try { Tick(); } catch (Exception ex) { Status = L.T("помилка: ", "error: ") + ex.Message; }
                 next += settings.IntervalSec * 1000L;
                 long wait = next - sw.ElapsedMilliseconds;
                 if (wait < 0) { next = sw.ElapsedMilliseconds; wait = 0; }
@@ -166,7 +166,7 @@ namespace DeadPixel
                 cpuUtil.NextValue(); cpuPerf.NextValue();
                 foreach (var c in coreUtil) c.NextValue();
             }
-            catch (Exception ex) { Status = "лічильники CPU: " + ex.Message; }
+            catch (Exception ex) { Status = L.T("лічильники CPU: ", "CPU counters: ") + ex.Message; }
         }
 
         static double P(string s)
@@ -213,7 +213,7 @@ namespace DeadPixel
             // Знімок усіх процесів — найдорожча частина тіку, тож не частіше ніж раз на ~4 с
             if (++procTick * settings.IntervalSec >= 4) { procTick = 0; try { TrackProcesses(s); } catch { } }
             try { Stalls.Sample(s.Time); } catch { }
-            Status = g != null ? "запис іде" : "запис іде (без даних GPU)";
+            Status = g != null ? L.T("запис іде", "recording") : L.T("запис іде (без даних GPU)", "recording (no GPU data)");
         }
 
         static string N(double v, string f) { return double.IsNaN(v) ? "" : v.ToString(f, CultureInfo.InvariantCulture); }
@@ -408,7 +408,7 @@ namespace DeadPixel
         {
             long v;
             if (string.IsNullOrEmpty(hex) || !long.TryParse(hex.Replace("0x", ""), NumberStyles.HexNumber, null, out v)) return "—";
-            if (v == 0) return "немає";
+            if (v == 0) return L.T("немає", "none");
             var r = new List<string>();
             if ((v & 0x1) != 0) r.Add("Idle");
             if ((v & 0x2) != 0) r.Add("AppClocks");
@@ -419,7 +419,7 @@ namespace DeadPixel
             if ((v & 0x40) != 0) r.Add("HW THERMAL");
             if ((v & 0x80) != 0) r.Add("POWER BRAKE");
             if ((v & 0x100) != 0) r.Add("DisplayClk");
-            if ((v & ~0x1FFL) != 0) r.Add("інше 0x" + (v & ~0x1FFL).ToString("X")); // нові біти драйвера — без них плитка була б порожня
+            if ((v & ~0x1FFL) != 0) r.Add(L.T("інше 0x", "other 0x") + (v & ~0x1FFL).ToString("X")); // нові біти драйвера — без них плитка була б порожня
             return string.Join(", ", r);
         }
 
@@ -435,7 +435,7 @@ namespace DeadPixel
     {
         string ns;
         DateTime nextProbe = DateTime.MinValue;
-        public volatile string Status = "не знайдено — запустіть LibreHardwareMonitor";
+        public volatile string Status = L.T("не знайдено — запустіть LibreHardwareMonitor", "not found — start LibreHardwareMonitor");
 
         public double Read()
         {
@@ -446,12 +446,12 @@ namespace DeadPixel
                 foreach (var cand in new[] { @"root\LibreHardwareMonitor", @"root\OpenHardwareMonitor" })
                 {
                     var v = Query(cand);
-                    if (!double.IsNaN(v)) { ns = cand; Status = "з " + cand.Substring(5); return v; }
+                    if (!double.IsNaN(v)) { ns = cand; Status = L.T("з ", "from ") + cand.Substring(5); return v; }
                 }
                 return double.NaN;
             }
             var r = Query(ns);
-            if (double.IsNaN(r)) { ns = null; Status = "джерело зникло — LibreHardwareMonitor закрито?"; }
+            if (double.IsNaN(r)) { ns = null; Status = L.T("джерело зникло — LibreHardwareMonitor закрито?", "source lost — was LibreHardwareMonitor closed?"); }
             return r;
         }
 

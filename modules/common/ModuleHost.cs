@@ -46,14 +46,15 @@ namespace DeadPixel
         public static T RunScript<T>(string script, string args, bool elevate)
         {
             var tmp = Path.Combine(Path.GetTempPath(), "deadpixel-" + Path.GetFileNameWithoutExtension(script).ToLowerInvariant() + "-" + Guid.NewGuid().ToString("N") + ".json");
+            // -Lang: тексти результатів (пояснення, кроки) скрипт формує мовою інтерфейсу
             var psi = new ProcessStartInfo("powershell.exe",
-                "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(Dir, script) + "\" " + args + " -OutFile \"" + tmp + "\"");
+                "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(Dir, script) + "\" " + args + " -Lang " + L.Code + " -OutFile \"" + tmp + "\"");
             if (elevate && !IsAdmin) { psi.UseShellExecute = true; psi.Verb = "runas"; psi.WindowStyle = ProcessWindowStyle.Hidden; }
             else { psi.UseShellExecute = false; psi.CreateNoWindow = true; }
             try
             {
                 using (var p = Process.Start(psi)) p.WaitForExit();
-                if (!File.Exists(tmp)) throw new Exception(script + " не повернув результат.");
+                if (!File.Exists(tmp)) throw new Exception(L.T(script + " не повернув результат.", script + " returned no result."));
                 return Deserialize<T>(File.ReadAllText(tmp, Encoding.UTF8));
             }
             finally { try { File.Delete(tmp); } catch { } }
@@ -73,6 +74,14 @@ namespace DeadPixel
                 : new ProcessStartInfo(run);
             psi.UseShellExecute = true;
             Process.Start(psi);
+        }
+
+        // Мова як у трей-програми: Language= у data\settings.ini (див. L.ReadSetting)
+        public static void InitLanguage()
+        {
+            L.Init(L.ReadSetting(
+                Path.GetFullPath(Path.Combine(Dir, @"..\..\data\settings.ini")),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"DeadPixel\settings.ini")));
         }
 
         // Тема як у трей-програми: data\settings.ini (Theme=system|light|dark), інакше — системна

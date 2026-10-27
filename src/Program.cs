@@ -36,6 +36,15 @@ namespace DeadPixel
         static void Main(string[] args)
         {
             ResolveDataDir();
+            L.Init(Settings.Load().Language);
+            // Перезапуск після зміни мови: нова копія чекає, доки стара звільнить mutex
+            for (int i = 0; i + 1 < args.Length; i++)
+                if (args[i] == "--wait-pid")
+                {
+                    int pid;
+                    if (int.TryParse(args[i + 1], out pid))
+                        try { using (var old = System.Diagnostics.Process.GetProcessById(pid)) old.WaitForExit(15000); } catch { }
+                }
             // Допоміжні режими, які запускаються з правами адміністратора (UAC)
             if (args.Length >= 2 && args[0] == "--analyze") { DumpAnalyzer.Run(args[1]); return; }
             if (args.Length >= 1 && args[0] == "--smart") { DiskMonitor.WriteSmartCache(); return; }

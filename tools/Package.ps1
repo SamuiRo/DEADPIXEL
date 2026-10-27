@@ -33,7 +33,8 @@ foreach ($f in 'DeadPixel.exe', 'DeadPixel.ps1', 'DeadPixel.cmd', 'README.md', '
 }
 Get-ChildItem (Join-Path $root 'modules') -Recurse -File | Where-Object {
     $rel = $_.FullName.Substring($root.Length + 1)
-    $rel -notmatch '\\(gui|common)\\' -and $rel -notmatch '\\data\\'   # вихідний код GUI вже в exe
+    # вихідний код GUI вже в exe; із common потрібен лише Lang.ps1 (його підключають скрипти)
+    $rel -notmatch '\\gui\\' -and $rel -notmatch '\.cs$' -and $rel -notmatch '\\data\\'
 } | ForEach-Object {
     $dest = Join-Path $stage $_.FullName.Substring($root.Length + 1)
     New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null

@@ -31,7 +31,7 @@ namespace DeadPixel
                 Put(sc, "Arguments", "--show");
                 Put(sc, "WorkingDirectory", Path.GetDirectoryName(exe));
                 Put(sc, "IconLocation", exe + ",0");
-                Put(sc, "Description", "DEADPIXEL — моніторинг і діагностика збоїв");
+                Put(sc, "Description", L.T("DEADPIXEL — моніторинг і діагностика збоїв", "DEADPIXEL — crash monitoring and diagnostics"));
                 Call(sc, "Save");
             }
             finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell); }

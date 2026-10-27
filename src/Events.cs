@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.Eventing.Reader;
 using System.IO;
@@ -11,40 +11,46 @@ namespace DeadPixel
     {
         static readonly Dictionary<long, string[]> Map = new Dictionary<long, string[]>
         {
-            { 0x0A, new[] { "IRQL_NOT_LESS_OR_EQUAL", "Драйвер звернувся до недопустимої пам'яті (драйвер або RAM)." } },
-            { 0x1A, new[] { "MEMORY_MANAGEMENT", "Помилка пам'яті. Перевірити RAM, вимкнути EXPO/XMP для тесту." } },
-            { 0x1E, new[] { "KMODE_EXCEPTION_NOT_HANDLED", "Необроблений виняток у драйвері." } },
-            { 0x3B, new[] { "SYSTEM_SERVICE_EXCEPTION", "Виняток у системному виклику (часто драйвер)." } },
-            { 0x50, new[] { "PAGE_FAULT_IN_NONPAGED_AREA", "Звернення до неіснуючої пам'яті: драйвер, RAM або диск." } },
-            { 0x7E, new[] { "SYSTEM_THREAD_EXCEPTION_NOT_HANDLED", "Виняток у системному потоці (драйвер)." } },
-            { 0x7F, new[] { "UNEXPECTED_KERNEL_MODE_TRAP", "Апаратна проблема CPU/RAM." } },
-            { 0x9F, new[] { "DRIVER_POWER_STATE_FAILURE", "Драйвер не впорався з переходом живлення (сон/пробудження)." } },
-            { 0xD1, new[] { "DRIVER_IRQL_NOT_LESS_OR_EQUAL", "Драйвер звернувся до пам'яті на високому IRQL." } },
-            { 0xEF, new[] { "CRITICAL_PROCESS_DIED", "Критичний системний процес завершився." } },
-            { 0x101, new[] { "CLOCK_WATCHDOG_TIMEOUT", "Ядро CPU не відповідає (PBO/Curve Optimizer/CPU)." } },
-            { 0x116, new[] { "VIDEO_TDR_FAILURE", "GPU завис, і Windows не змогла перезапустити відеодрайвер." } },
-            { 0x117, new[] { "VIDEO_TDR_TIMEOUT_DETECTED", "Відеодрайвер перестав відповідати (відновлено)." } },
-            { 0x119, new[] { "VIDEO_SCHEDULER_INTERNAL_ERROR", "Помилка планувальника GPU." } },
-            { 0x124, new[] { "WHEA_UNCORRECTABLE_ERROR", "Некоректовна апаратна помилка (CPU/RAM/PCIe)." } },
-            { 0x133, new[] { "DPC_WATCHDOG_VIOLATION", "Драйвер занадто довго тримав CPU (часто GPU/NVMe/USB)." } },
-            { 0x139, new[] { "KERNEL_SECURITY_CHECK_FAILURE", "Пошкодження структур ядра: драйвер або RAM." } },
-            { 0x141, new[] { "VIDEO_ENGINE_TIMEOUT_DETECTED", "GPU завис, драйвер перезапущено без BSOD." } },
-            { 0x144, new[] { "BUGCODE_USB3_DRIVER", "Збій USB3-контролера/пристрою." } },
-            { 0x154, new[] { "UNEXPECTED_STORE_EXCEPTION", "Проблема з диском або пам'яттю." } },
-            { 0x1B8, new[] { "GPU_LIVE_DUMP", "Дамп стану GPU разом із TDR." } },
+            { 0x0A, new[] { "IRQL_NOT_LESS_OR_EQUAL", L.T("Драйвер звернувся до недопустимої пам'яті (драйвер або RAM).", "A driver accessed invalid memory (driver or RAM).") } },
+            { 0x1A, new[] { "MEMORY_MANAGEMENT", L.T("Помилка пам'яті. Перевірити RAM, вимкнути EXPO/XMP для тесту.", "Memory error. Test the RAM; disable EXPO/XMP for a test.") } },
+            { 0x1E, new[] { "KMODE_EXCEPTION_NOT_HANDLED", L.T("Необроблений виняток у драйвері.", "Unhandled exception in a driver.") } },
+            { 0x3B, new[] { "SYSTEM_SERVICE_EXCEPTION", L.T("Виняток у системному виклику (часто драйвер).", "Exception in a system call (often a driver).") } },
+            { 0x50, new[] { "PAGE_FAULT_IN_NONPAGED_AREA", L.T("Звернення до неіснуючої пам'яті: драйвер, RAM або диск.", "Access to non-existent memory: driver, RAM or disk.") } },
+            { 0x7E, new[] { "SYSTEM_THREAD_EXCEPTION_NOT_HANDLED", L.T("Виняток у системному потоці (драйвер).", "Exception in a system thread (driver).") } },
+            { 0x7F, new[] { "UNEXPECTED_KERNEL_MODE_TRAP", L.T("Апаратна проблема CPU/RAM.", "CPU/RAM hardware problem.") } },
+            { 0x9F, new[] { "DRIVER_POWER_STATE_FAILURE", L.T("Драйвер не впорався з переходом живлення (сон/пробудження).", "A driver failed a power transition (sleep/wake).") } },
+            { 0xD1, new[] { "DRIVER_IRQL_NOT_LESS_OR_EQUAL", L.T("Драйвер звернувся до пам'яті на високому IRQL.", "A driver accessed memory at a high IRQL.") } },
+            { 0xEF, new[] { "CRITICAL_PROCESS_DIED", L.T("Критичний системний процес завершився.", "A critical system process terminated.") } },
+            { 0x101, new[] { "CLOCK_WATCHDOG_TIMEOUT", L.T("Ядро CPU не відповідає (PBO/Curve Optimizer/CPU).", "A CPU core stopped responding (PBO/Curve Optimizer/CPU).") } },
+            { 0x116, new[] { "VIDEO_TDR_FAILURE", L.T("GPU завис, і Windows не змогла перезапустити відеодрайвер.", "The GPU hung and Windows could not restart the graphics driver.") } },
+            { 0x117, new[] { "VIDEO_TDR_TIMEOUT_DETECTED", L.T("Відеодрайвер перестав відповідати (відновлено).", "The graphics driver stopped responding (recovered).") } },
+            { 0x119, new[] { "VIDEO_SCHEDULER_INTERNAL_ERROR", L.T("Помилка планувальника GPU.", "GPU scheduler error.") } },
+            { 0x124, new[] { "WHEA_UNCORRECTABLE_ERROR", L.T("Некоректовна апаратна помилка (CPU/RAM/PCIe).", "Uncorrectable hardware error (CPU/RAM/PCIe).") } },
+            { 0x133, new[] { "DPC_WATCHDOG_VIOLATION", L.T("Драйвер занадто довго тримав CPU (часто GPU/NVMe/USB).", "A driver held the CPU too long (often GPU/NVMe/USB).") } },
+            { 0x139, new[] { "KERNEL_SECURITY_CHECK_FAILURE", L.T("Пошкодження структур ядра: драйвер або RAM.", "Kernel structure corruption: driver or RAM.") } },
+            { 0x141, new[] { "VIDEO_ENGINE_TIMEOUT_DETECTED", L.T("GPU завис, драйвер перезапущено без BSOD.", "The GPU hung; the driver was restarted without a BSOD.") } },
+            { 0x144, new[] { "BUGCODE_USB3_DRIVER", L.T("Збій USB3-контролера/пристрою.", "USB3 controller/device failure.") } },
+            { 0x154, new[] { "UNEXPECTED_STORE_EXCEPTION", L.T("Проблема з диском або пам'яттю.", "Disk or memory problem.") } },
+            { 0x1B8, new[] { "GPU_LIVE_DUMP", L.T("Дамп стану GPU разом із TDR.", "GPU state dump captured with a TDR.") } },
         };
 
         public static string[] Get(long code)
         {
             string[] v;
             if (Map.TryGetValue(code, out v)) return v;
-            if (code == 0) return new[] { "Без BSOD", "Раптове вимкнення: живлення, ручний ресет, БЖ або перегрів." };
-            return new[] { "UNKNOWN", string.Format("Невідомий код 0x{0:X}", code) };
+            if (code == 0) return new[] { L.T("Без BSOD", "No BSOD"), L.T("Раптове вимкнення: живлення, ручний ресет, БЖ або перегрів.", "Sudden power-off: power loss, manual reset, PSU or overheating.") };
+            return new[] { "UNKNOWN", string.Format(L.T("Невідомий код 0x{0:X}", "Unknown code 0x{0:X}"), code) };
         }
     }
 
     class EvItem
     {
+        // Category — внутрішній ключ (GPU, WHEA, CPU, USB, «Диск», «Програма»); підпис — мовою інтерфейсу
+        public static string CategoryText(string c)
+        {
+            return c == "Диск" ? L.T("Диск", "Disk") : c == "Програма" ? L.T("Програма", "App") : c;
+        }
+
         public DateTime Time;
         public string Category, Source, Text;
         public int Id;
@@ -124,7 +130,7 @@ namespace DeadPixel
                     Add(new EvItem
                     {
                         Time = DateTime.Now, Category = cat, Source = "LiveKernelReports", Level = 2,
-                        Text = (cat == "GPU" ? "Зависання GPU — Windows перезапустила драйвер. " : "Збій USB-контролера. ") + e.FullPath
+                        Text = (cat == "GPU" ? L.T("Зависання GPU — Windows перезапустила драйвер. ", "GPU hang — Windows restarted the driver. ") : L.T("Збій USB-контролера. ", "USB controller failure. ")) + e.FullPath
                     }, true);
                 };
                 fw.EnableRaisingEvents = true;
@@ -181,9 +187,9 @@ namespace DeadPixel
             try
             {
                 if (it.Source == "Application Error" && r.Properties.Count > 3)
-                    text = r.Properties[0].Value + " впала (модуль: " + r.Properties[3].Value + ")";
+                    text = string.Format(L.T("{0} впала (модуль: {1})", "{0} crashed (module: {1})"), r.Properties[0].Value, r.Properties[3].Value);
                 else if (it.Source == "Application Hang" && r.Properties.Count > 0)
-                    text = r.Properties[0].Value + " зависла і була закрита";
+                    text = string.Format(L.T("{0} зависла і була закрита", "{0} hung and was closed"), r.Properties[0].Value);
                 else text = r.FormatDescription();
             }
             catch { }
