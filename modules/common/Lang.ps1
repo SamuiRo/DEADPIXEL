@@ -17,4 +17,6 @@ function Resolve-UiLang([string]$Requested, [string]$Root) {
 }
 
 $script:UiLang = 'uk'
-function T([string]$uk, [string]$en) { if ($script:UiLang -eq 'en') { $en } else { $uk } }
+# $UiLang без «script:» навмисно: рецепти запускаються через «&» і мають власну область script:, де змінної немає;
+# звичайний пошук іде вгору ланцюжком викликів і знаходить її в Setup.ps1 / Audit.ps1
+function T([string]$uk, [string]$en) { if ($UiLang -eq 'en') { $en } else { $uk } }

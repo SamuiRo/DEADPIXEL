@@ -43,47 +43,47 @@ function Assert-CleanupTarget($it) {
     switch ($it.Kind) {
         'Path' {
             $p = [IO.Path]::GetFullPath($it.Target).TrimEnd('\'); $l = $p.ToLowerInvariant()
-            if (-not (Test-Path -LiteralPath $p)) { throw 'вже немає' }
-            if (Test-InWindows $p) { throw 'це папка Windows' }
-            if ((Get-AllowedParents) -notcontains (Split-Path $p).ToLowerInvariant()) { throw 'дозволено лише папки верхнього рівня в Program Files, ProgramData, AppData і ярлики автозавантаження' }
-            if ((Split-Path $p -Leaf) -match '^(microsoft|windows|packages|programs|temp)') { throw 'службова папка' }
+            if (-not (Test-Path -LiteralPath $p)) { throw (T 'вже немає' 'already gone') }
+            if (Test-InWindows $p) { throw (T 'це папка Windows' 'this is a Windows folder') }
+            if ((Get-AllowedParents) -notcontains (Split-Path $p).ToLowerInvariant()) { throw (T 'дозволено лише папки верхнього рівня в Program Files, ProgramData, AppData і ярлики автозавантаження' 'only top-level folders in Program Files, ProgramData, AppData and startup shortcuts are allowed') }
+            if ((Split-Path $p -Leaf) -match '^(microsoft|windows|packages|programs|temp)') { throw (T 'службова папка' 'a system folder') }
             $self = (Split-Path (Split-Path $PSScriptRoot)).ToLowerInvariant()
-            if ($self -eq $l -or $self.StartsWith($l + '\')) { throw 'тут встановлено DEADPIXEL' }
+            if ($self -eq $l -or $self.StartsWith($l + '\')) { throw (T 'тут встановлено DEADPIXEL' 'DEADPIXEL is installed here') }
             $run = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLowerInvariant().StartsWith($l + '\') })
-            if ($run) { throw "з цієї папки зараз працює $($run[0].Name)" }
+            if ($run) { throw (T "з цієї папки зараз працює $($run[0].Name)" "$($run[0].Name) is running from this folder") }
         }
         'RegistryKey' {
-            if (-not ($RegAllowed | Where-Object { $it.Target -match $_ })) { throw 'цей розділ реєстру карантин не чіпає' }
-            if (-not (Test-Path -LiteralPath $it.Target)) { throw 'вже немає' }
+            if (-not ($RegAllowed | Where-Object { $it.Target -match $_ })) { throw (T 'цей розділ реєстру карантин не чіпає' 'quarantine does not touch this registry key') }
+            if (-not (Test-Path -LiteralPath $it.Target)) { throw (T 'вже немає' 'already gone') }
         }
         'RegistryValue' {
-            if ($it.Key -notmatch $RunKeys) { throw 'це не запис автозапуску' }
-            if ($null -eq (Get-ItemProperty -LiteralPath $it.Key -Name $it.Name -ErrorAction SilentlyContinue)) { throw 'вже немає' }
+            if ($it.Key -notmatch $RunKeys) { throw (T 'це не запис автозапуску' 'this is not an autostart entry') }
+            if ($null -eq (Get-ItemProperty -LiteralPath $it.Key -Name $it.Name -ErrorAction SilentlyContinue)) { throw (T 'вже немає' 'already gone') }
         }
         'Service' {
             $k = "HKLM:\SYSTEM\CurrentControlSet\Services\$($it.Name)"
-            if ($it.Name -notmatch '^[\w.\- ]+$' -or -not (Test-Path -LiteralPath $k)) { throw 'служби вже немає' }
+            if ($it.Name -notmatch '^[\w.\- ]+$' -or -not (Test-Path -LiteralPath $k)) { throw (T 'служби вже немає' 'the service is already gone') }
             $img = Resolve-ImagePath (Get-ItemProperty -LiteralPath $k).ImagePath
-            if (-not $img -or (Test-InWindows $img)) { throw 'служба Windows' }
-            if (Test-Path -LiteralPath $img) { throw 'файл служби існує - це не хвіст' }
+            if (-not $img -or (Test-InWindows $img)) { throw (T 'служба Windows' 'a Windows service') }
+            if (Test-Path -LiteralPath $img) { throw (T 'файл служби існує - це не хвіст' 'the service file exists - not a leftover') }
         }
         'Task' {
-            if ($it.Key -like '\Microsoft\*') { throw 'завдання Windows' }
+            if ($it.Key -like '\Microsoft\*') { throw (T 'завдання Windows' 'a Windows task') }
             $t = Get-ScheduledTask -TaskPath $it.Key -TaskName $it.Name -ErrorAction Stop
             foreach ($a in @($t.Actions | Where-Object { $_.Execute })) {
-                if (Test-Path -LiteralPath (Resolve-ImagePath $a.Execute)) { throw 'файл завдання існує - це не хвіст' }
+                if (Test-Path -LiteralPath (Resolve-ImagePath $a.Execute)) { throw (T 'файл завдання існує - це не хвіст' 'the task file exists - not a leftover') }
             }
         }
         'PathEntry' {
-            if ($it.Scope -notin 'Machine', 'User') { throw 'невідомий PATH' }
-            if (Test-Path -LiteralPath ([Environment]::ExpandEnvironmentVariables($it.Target))) { throw 'папка існує' }
+            if ($it.Scope -notin 'Machine', 'User') { throw (T 'невідомий PATH' 'unknown PATH') }
+            if (Test-Path -LiteralPath ([Environment]::ExpandEnvironmentVariables($it.Target))) { throw (T 'папка існує' 'the folder exists') }
         }
         'FirewallRule' {
             $p = [Environment]::ExpandEnvironmentVariables($it.Target)
-            if (Test-InWindows $p) { throw 'правило компонента Windows' }
-            if (Test-Path -LiteralPath $p) { throw 'програма існує - це не хвіст' }
+            if (Test-InWindows $p) { throw (T 'правило компонента Windows' 'a Windows component rule') }
+            if (Test-Path -LiteralPath $p) { throw (T 'програма існує - це не хвіст' 'the program exists - not a leftover') }
         }
-        default { throw "невідомий тип: $($it.Kind)" }
+        default { throw (T "невідомий тип: $($it.Kind)" "unknown kind: $($it.Kind)") }
     }
 }
 
@@ -99,7 +99,7 @@ function Invoke-Native([string]$exe, [string[]]$arguments) {
 function Export-RegKey([string]$psPath, [string]$file) {
     $regPath = $psPath -replace '^HKLM:\\', 'HKLM\' -replace '^HKCU:\\', 'HKCU\'
     $code = Invoke-Native reg.exe @('export', $regPath, $file, '/y')
-    if ($code -ne 0) { throw "не вдалося зберегти розділ реєстру (reg export: $code)" }
+    if ($code -ne 0) { throw (T "не вдалося зберегти розділ реєстру (reg export: $code)" "could not save the registry key (reg export: $code)") }
 }
 
 function Send-EnvironmentChange {
@@ -146,7 +146,7 @@ function Move-ToQuarantine($it, [string]$dir, [int]$n) {
             else {
                 # robocopy переносить і між дисками (Move-Item для папок - ні); /XJ - не йти за посиланнями-переходами
                 $code = Invoke-Native robocopy.exe @($src, $dst, '/E', '/MOVE', '/COPY:DAT', '/DCOPY:T', '/R:1', '/W:1', '/XJ', '/NFL', '/NDL', '/NJH', '/NJS', '/NP')
-                if ($code -ge 8) { throw "не вдалося перенести (robocopy: $code)" }
+                if ($code -ge 8) { throw (T "не вдалося перенести (robocopy: $code)" "could not move (robocopy: $code)") }
                 # Частину файлів (зайнятих) не перенесено: запис лишається відновлюваним, відновлення злиє файли назад
                 if (Test-Path -LiteralPath $src) { return @{ Stored = "files\$n"; Original = $src; Partial = $true } }
             }
@@ -162,7 +162,7 @@ function Move-ToQuarantine($it, [string]$dir, [int]$n) {
             $f = "reg-$n.reg"
             Export-RegKey "HKLM:\SYSTEM\CurrentControlSet\Services\$($it.Name)" (Join-Path $dir $f)
             $code = Invoke-Native sc.exe @('delete', $it.Name)
-            if ($code -notin 0, 1072) { throw "sc delete: код $code" }   # 1072 - уже позначена до видалення
+            if ($code -notin 0, 1072) { throw "sc delete: $code" }   # 1072 - уже позначена до видалення
             return @{ RegFile = $f }
         }
         'RegistryValue' {
@@ -191,7 +191,7 @@ function Move-ToQuarantine($it, [string]$dir, [int]$n) {
         'FirewallRule' {
             $idx = Get-FirewallIndex
             $mine = @($idx.Rules | Where-Object { $idx.Apps[$_.Name] -and $idx.Apps[$_.Name] -eq $it.Target })
-            if (-not $mine) { throw 'правил для цієї програми не знайдено' }
+            if (-not $mine) { throw (T 'правил для цієї програми не знайдено' 'no rules found for this program') }
             $saved = @(foreach ($r in $mine) {
                 $pf = $idx.Ports[$r.Name]; $af = $idx.Addrs[$r.Name]
                 [ordered]@{
@@ -207,7 +207,7 @@ function Move-ToQuarantine($it, [string]$dir, [int]$n) {
 }
 
 function Invoke-Cleanup([string]$file) {
-    if (-not (Test-Admin)) { throw 'Для прибирання потрібні права адміністратора.' }
+    if (-not (Test-Admin)) { throw (T 'Для прибирання потрібні права адміністратора.' 'Cleanup needs administrator rights.') }
     # ConvertFrom-Json у PowerShell 5.1 віддає JSON-масив одним об'єктом - розгортаємо його в окремі пункти
     $items = @((Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json) | ForEach-Object { $_ })
     $id = (Get-Date).ToString('yyyyMMdd-HHmmss')
@@ -220,7 +220,7 @@ function Invoke-Cleanup([string]$file) {
         try {
             Assert-CleanupTarget $it
             $rec.Saved = Move-ToQuarantine $it $dir $n
-            if ($rec.Saved.Partial) { $rec.Message = 'частину файлів не перенесено (зайняті іншою програмою)' }
+            if ($rec.Saved.Partial) { $rec.Message = (T 'частину файлів не перенесено (зайняті іншою програмою)' 'some files were not moved (in use by another program)') }
         } catch { $rec.Status = 'SKIP'; $rec.Message = $_.Exception.Message }
         [pscustomobject]$rec
     }
@@ -231,15 +231,15 @@ function Invoke-Cleanup([string]$file) {
 }
 
 function Get-Session([string]$id) {
-    if ($id -notmatch '^\d{8}-\d{6}$') { throw 'неправильний ідентифікатор сесії' }
+    if ($id -notmatch '^\d{8}-\d{6}$') { throw (T 'неправильний ідентифікатор сесії' 'invalid session id') }
     $dir = Join-Path (Get-QuarantineRoot) $id
     $m = Join-Path $dir 'manifest.json'
-    if (-not (Test-Path $m)) { throw 'сесії карантину не знайдено' }
+    if (-not (Test-Path $m)) { throw (T 'сесії карантину не знайдено' 'quarantine session not found') }
     @{ Dir = $dir; Manifest = $m; Data = (Get-Content $m -Raw -Encoding UTF8 | ConvertFrom-Json) }
 }
 
 function Restore-Quarantine([string]$id) {
-    if (-not (Test-Admin)) { throw 'Для відновлення потрібні права адміністратора.' }
+    if (-not (Test-Admin)) { throw (T 'Для відновлення потрібні права адміністратора.' 'Restoring needs administrator rights.') }
     $s = Get-Session $id
     $res = @()
     $todo = @($s.Data.Items | Where-Object Status -eq 'MOVED')
@@ -249,7 +249,7 @@ function Restore-Quarantine([string]$id) {
         try {
             switch ($rec.Kind) {
                 'Path' {
-                    if ((Test-Path -LiteralPath $sv.Original) -and -not $sv.Partial) { throw "на місці вже є $($sv.Original)" }
+                    if ((Test-Path -LiteralPath $sv.Original) -and -not $sv.Partial) { throw (T "на місці вже є $($sv.Original)" "$($sv.Original) already exists") }
                     $from = Join-Path $s.Dir $sv.Stored
                     if (Test-Path -LiteralPath $from -PathType Leaf) { Move-Item -LiteralPath $from -Destination $sv.Original }
                     else {
@@ -288,7 +288,7 @@ function Restore-Quarantine([string]$id) {
                     }
                 }
             }
-            $rec.Status = 'RESTORED'; $msg = if ($rec.Kind -eq 'Service') { 'діє після перезавантаження' } else { '' }
+            $rec.Status = 'RESTORED'; $msg = if ($rec.Kind -eq 'Service') { T 'діє після перезавантаження' 'takes effect after a restart' } else { '' }
             $res += [pscustomobject]@{ Label = $rec.Label; Status = 'RESTORED'; Message = $msg }
         } catch {
             $res += [pscustomobject]@{ Label = $rec.Label; Status = 'FAIL'; Message = $_.Exception.Message }
@@ -319,10 +319,10 @@ function Get-QuarantineList {
 
 # Остаточне видалення: лише через 30 днів (або якщо все вже відновлено) - час помітити, що щось зламалося
 function Remove-QuarantineSession([string]$id) {
-    if (-not (Test-Admin)) { throw 'Для остаточного видалення потрібні права адміністратора.' }
+    if (-not (Test-Admin)) { throw (T 'Для остаточного видалення потрібні права адміністратора.' 'Permanent deletion needs administrator rights.') }
     $s = Get-Session $id
     $age = ((Get-Date) - [datetime]$s.Data.Time).TotalDays
-    if (-not $s.Data.Restored -and $age -lt $QuarantineDays) { throw "Остаточно видалити можна через $QuarantineDays днів після перенесення (лишилось $([int][Math]::Ceiling($QuarantineDays - $age)) дн.)." }
+    if (-not $s.Data.Restored -and $age -lt $QuarantineDays) { throw (T "Остаточно видалити можна через $QuarantineDays днів після перенесення (лишилось $([int][Math]::Ceiling($QuarantineDays - $age)) дн.)." "Permanent deletion is allowed $QuarantineDays days after quarantining ($([int][Math]::Ceiling($QuarantineDays - $age)) days left).") }
     Remove-Item -LiteralPath $s.Dir -Recurse -Force
     [pscustomobject]@{ Error = $null; Session = $id; Items = @() }
 }
