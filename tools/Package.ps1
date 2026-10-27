@@ -69,7 +69,8 @@ if ($iscc) {
 $sums = Get-ChildItem $dist -File -Include '*.zip', '*.exe' -Recurse | Where-Object { $_.DirectoryName -eq $dist } | ForEach-Object {
     '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
 }
-[IO.File]::WriteAllLines((Join-Path $dist 'SHA256SUMS.txt'), [string[]]$sums)
+# LF, а не CRLF: інакше стандартний `sha256sum -c` (Linux, Git Bash) не знаходить файли
+[IO.File]::WriteAllText((Join-Path $dist 'SHA256SUMS.txt'), (($sums -join "`n") + "`n"))
 
 # Розділ "## [X.Y.Z]" з CHANGELOG.md — текст сторінки релізу на GitHub
 $changelog = Get-Content (Join-Path $root 'CHANGELOG.md') -Encoding UTF8
