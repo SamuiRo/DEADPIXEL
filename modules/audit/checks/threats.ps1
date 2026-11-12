@@ -74,6 +74,38 @@ $script:Incidents = @(
             @{ Indicators = $ind; Exposure = $exp; Cleanup = $clean; Files = $files }
         }
     }
+    @{
+        # Хробак у пакетах npm: preinstall запускає setup_bun.js, той - великий заплутаний bun_environment.js,
+        # який краде токени GitHub/npm і ключі хмар та публікує заражені версії пакетів жертви
+        Id = 'shai-hulud-2025'; Name = (T 'Хробак Shai-Hulud у пакетах npm' 'Shai-Hulud worm in npm packages'); Date = '2025-11-24'
+        Url = 'https://www.stepsecurity.io/blog/sha1-hulud-the-second-coming-zapier-ens-domains-and-other-prominent-npm-packages-compromised'
+        Find = {
+            # Лише глобально встановлені пакети: проєкти на дисках аудит не обходить (це години на великих дисках)
+            $roots = @()
+            $npm = Get-Command npm -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($npm) { $roots += Join-Path (Split-Path $npm.Source) 'node_modules' }
+            $roots += (Join-Path $env:APPDATA 'npm\node_modules'), (Join-Path $env:LOCALAPPDATA 'pnpm\global')
+            if ($env:NVM_HOME) { $roots += @(Get-ChildItem -LiteralPath $env:NVM_HOME -Directory -Filter 'v*' -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'node_modules' }) }
+            $roots = @($roots | Where-Object { Test-Path -LiteralPath $_ } | ForEach-Object { (Get-Item -LiteralPath $_).FullName } | Sort-Object -Unique)
+            if (-not $roots) { return $null }
+            $ind = @(); $files = @()
+            foreach ($r in $roots) {
+                foreach ($f in Find-FilesByExtension $r '.js' 600000) {
+                    $name = [IO.Path]::GetFileName($f)
+                    if ($name -eq 'bun_environment.js') {
+                        # Справжній файл хробака - кілька мегабайт заплутаного коду; дрібний однойменний файл індикатором не вважаємо
+                        if ((Get-Item -LiteralPath $f -Force).Length -lt 1MB) { continue }
+                    } elseif ($name -eq 'setup_bun.js') {
+                        $pkg = Read-SharedText (Join-Path (Split-Path $f) 'package.json') 2MB
+                        if (-not $pkg -or $pkg -notmatch '"(pre|post)?install"\s*:\s*"[^"]*setup_bun') { continue }
+                    } else { continue }
+                    $ind += (T 'Файл хробака в глобально встановленому пакеті: ' 'Worm file in a globally installed package: ') + $f
+                    $files += $f
+                }
+            }
+            @{ Indicators = $ind; Exposure = @(); Cleanup = @(); Files = $files }
+        }
+    }
 )
 
 # ---------------------------------------------------------------- COM

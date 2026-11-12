@@ -42,6 +42,10 @@
   розширення браузерів із доступом до всіх сайтів, токени у відкритих файлах (`.aws\credentials`, `.npmrc`,
   `.git-credentials`, Docker, rclone…), ключі SSH без пароля, секрети у змінних середовища, файли на кшталт «паролі.txt».
   Значення секретів не читаються і у звіт не потрапляють — лише імена файлів і змінних.
+- **Розробка й ШІ-агенти** — ланцюг постачання пакетів і агенти, які самі запускають команди: скрипти встановлення
+  npm/pnpm, затримка для свіжих версій пакетів, режими без підтвердження в Claude Code і Codex, автозапуск завдань
+  у VS Code/Cursor, сервери MCP без зафіксованої версії, невидимі символи в правилах і навичках агентів, команди
+  в глобальному `.gitconfig`. Рецепт: `npm-hardening`. Читаються лише файли налаштувань, нічого не запускається.
 - **Сліди зламу** — індикатори відомих інцидентів (список у `checks/threats.ps1`, поповнюється з релізами; перший —
   злам лаунчера NIKKE 2026), перехоплення COM-компонентів у розділі користувача, програми без підпису в профілях
   браузерів, файл hosts, системний проксі, сторонні кореневі сертифікати.
@@ -74,7 +78,7 @@
 
 ```bat
 powershell -File Audit.ps1                      :: усі перевірки; код виходу = кількість критичних і високих
-powershell -File Audit.ps1 -Area platform       :: одна область (platform, windows, hardening, accounts, secrets, network, processes, threats, software, health, leftovers)
+powershell -File Audit.ps1 -Area platform       :: одна область (platform, windows, hardening, accounts, secrets, devtools, network, processes, threats, software, health, leftovers)
 powershell -File Audit.ps1 -Html report.html    :: останній звіт як HTML
 powershell -File Audit.ps1 -Schedule 3          :: автоматично раз на 3 дні; 0 — вимкнути
 powershell -File Audit.ps1 -Check hvci,uac      :: окремі перевірки

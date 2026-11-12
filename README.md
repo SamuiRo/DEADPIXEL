@@ -42,6 +42,10 @@ Three areas cover what the antivirus alone does not:
   `winsqlite3.dll`), browser extensions with access to all sites, tokens in plain-text files (`.aws\credentials`,
   `.npmrc`, `.git-credentials`, Docker, rclone…), SSH keys without a passphrase, secrets in environment variables, files
   named like "passwords.txt". Secret values are never read into the report — only file and variable names.
+- **Development and AI agents** — the package supply chain and agents that run commands on their own: npm/pnpm install
+  scripts, a cooldown for freshly published versions, no-approval modes in Claude Code and Codex, auto-run tasks in
+  VS Code/Cursor, MCP servers without a pinned version, invisible characters in agent rules and skills, commands in the
+  global `.gitconfig`. Recipe: `npm-hardening`. Only settings files are read; nothing is executed.
 - **Signs of compromise** — indicators of known incidents (the list lives in `checks/threats.ps1` and grows with releases;
   the first entry is the 2026 NIKKE launcher compromise), per-user COM hijacking, unsigned executables in browser
   profiles, the hosts file, the system proxy, foreign root certificates. Findings are removed through quarantine, which
@@ -74,7 +78,7 @@ A scan takes a few seconds. Reports are in `data\audit\` (`latest.json`, `histor
 
 ```bat
 powershell -File Audit.ps1                      :: all checks; exit code = number of critical and high findings
-powershell -File Audit.ps1 -Area platform       :: one area (platform, windows, hardening, accounts, secrets, network, processes, threats, software, health, leftovers)
+powershell -File Audit.ps1 -Area platform       :: one area (platform, windows, hardening, accounts, secrets, devtools, network, processes, threats, software, health, leftovers)
 powershell -File Audit.ps1 -Html report.html    :: the latest report as HTML
 powershell -File Audit.ps1 -Schedule 3          :: automatically every 3 days; 0 turns it off
 powershell -File Audit.ps1 -Check hvci,uac      :: specific checks

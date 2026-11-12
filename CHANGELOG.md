@@ -28,6 +28,14 @@
   exclusions, full scan age, Windows Script Host.*
 - Аудит: перевірка **«Програми з відомими вразливостями»** — версії WinRAR, 7-Zip, PuTTY, Git, KeePass, AnyDesk,
   Notepad++, для яких уже є способи атаки. *Programs with known exploited vulnerabilities.*
+- Аудит: область **«Розробка й ШІ-агенти»** — скрипти встановлення пакетів npm/pnpm, затримка для свіжих версій
+  пакетів, режими ШІ-агентів без підтвердження (Claude Code, Codex) та автозапуск у VS Code/Cursor, сервери MCP без
+  зафіксованої версії, невидимі символи Unicode у правилах і навичках агентів, команди в глобальному `.gitconfig`.
+  До відомих інцидентів додано хробака Shai-Hulud (npm, листопад 2025) — у глобально встановлених пакетах.
+  Рецепт `npm-hardening` (`ignore-scripts`, `min-release-age` у `~/.npmrc`).
+  *Development and AI agents: npm/pnpm install scripts, release-age cooldown, no-approval agent modes and editor
+  auto-run, unpinned MCP servers, hidden Unicode in agent rules and skills, commands in the global `.gitconfig`;
+  Shai-Hulud indicators; the `npm-hardening` recipe.*
 - Сетап: рецепти `asr-rules` (15 правил ASR, кожне відкочується окремо), `network-protection`, `script-host-off`;
   перші два додано в профіль «Безпека». *Setup recipes: `asr-rules`, `network-protection`, `script-host-off`.*
 
