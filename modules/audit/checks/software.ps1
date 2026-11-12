@@ -62,9 +62,60 @@ function Get-EolInfo([string]$name) {
     $null
 }
 
+# Версії з вразливостями, якими вже користуються зловмисники: назва в «Програмах і компонентах» → мінімальна безпечна версія.
+# Сюди потрапляє лише перевірене за бюлетенем виробника; загальну «є новіша версія» показує outdated-software.
+$script:KnownVulnerable = @(
+    @{ Match = '^WinRAR '; Name = 'WinRAR'; Min = '7.13'; Sev = 'high'; Cve = 'CVE-2025-8088'
+       Why = (T 'спеціально зроблений архів під час розпакування кладе програму в автозавантаження; вразливість використовували в реальних атаках' 'a crafted archive drops a program into Startup when extracted; exploited in real attacks') }
+    @{ Match = '^7-Zip '; Name = '7-Zip'; Min = '25.00'; Sev = 'high'; Cve = 'CVE-2025-0411, CVE-2025-11001'
+       Why = (T 'файли з архіву втрачають позначку «з інтернету» (SmartScreen мовчить), а архів із символьними посиланнями записує файли поза папкою розпакування' 'files from an archive lose the "from the internet" mark (SmartScreen stays silent), and an archive with symlinks writes files outside the extraction folder') }
+    @{ Match = '^PuTTY release '; Name = 'PuTTY'; Min = '0.81'; Sev = 'medium'; Cve = 'CVE-2024-31497'
+       Why = (T 'приватний ключ ECDSA P-521 можна відновити за підписами; такі ключі треба замінити' 'an ECDSA P-521 private key can be recovered from signatures; such keys must be replaced') }
+    @{ Match = '^Git$|^Git version '; Name = 'Git for Windows'; Min = '2.50.1'; Sev = 'medium'; Cve = 'CVE-2025-48384'
+       Why = (T 'клонування шкідливого репозиторію з підмодулями виконує чужий код' 'cloning a malicious repository with submodules runs foreign code') }
+    @{ Match = '^KeePass Password Safe 2'; Name = 'KeePass 2'; Min = '2.54'; Sev = 'medium'; Cve = 'CVE-2023-32784'
+       Why = (T 'головний пароль можна відновити з пам''яті процесу або файлу підкачки' 'the master password can be recovered from process memory or the page file') }
+    @{ Match = '^AnyDesk'; Name = 'AnyDesk'; Min = '8.0.8'; Sev = 'medium'; Cve = (T 'злам AnyDesk, лютий 2024' 'AnyDesk breach, February 2024')
+       Why = (T 'старіші версії підписані сертифікатом, викраденим під час зламу виробника' 'older versions are signed with a certificate stolen in the vendor breach') }
+    @{ Match = '^Notepad\+\+ '; Name = 'Notepad++'; Min = '8.8.9'; Sev = 'medium'; Cve = 'CVE-2025-15556'
+       Why = (T 'вбудований оновлювач не перевіряв завантажений файл: оновлення можна було підмінити шкідливим' 'the built-in updater did not verify the downloaded file: an update could be swapped for a malicious one') }
+)
+
+# '7.13.0', 'ad 8.0.8', '24.09 (x64)' → [version]; $null - не розібрати
+function ConvertTo-AppVersion([string]$s) {
+    $m = [regex]::Match("$s", '\d+(\.\d+){1,3}')
+    if (-not $m.Success) { return $null }
+    try { [version]$m.Value } catch { $null }
+}
+
 @{
     Id = 'software'; Title = (T 'Програми й драйвери' 'Programs and drivers'); Order = 6
     Checks = @(
+        @{
+            Id = 'known-vulnerable'; Title = (T 'Програми з відомими вразливостями' 'Programs with known vulnerabilities')
+            Test = {
+                $hits = @(); $seen = @{}; $matched = 0
+                foreach ($a in Get-InstalledApps) {
+                    foreach ($k in $KnownVulnerable) {
+                        if ($a.DisplayName -notmatch $k.Match -or $seen[$k.Name]) { continue }
+                        # У назві версія точніша, ніж у DisplayVersion (PuTTY release 0.80, 7-Zip 24.09 (x64))
+                        $v = ConvertTo-AppVersion $a.DisplayVersion
+                        if (-not $v) { $v = ConvertTo-AppVersion ($a.DisplayName -replace $k.Match, '') }
+                        if (-not $v) { continue }
+                        $seen[$k.Name] = $true; $matched++
+                        if ($v -lt [version]$k.Min) { $hits += [pscustomobject]@{ Sev = $k.Sev; Line = "⚠ $($k.Name) $v → " + (T "потрібна $($k.Min) або новіша" "needs $($k.Min) or newer") + " ($($k.Cve)): $($k.Why)" } }
+                    }
+                }
+                $note = T "У списку програм: $($KnownVulnerable.Count), встановлено з них: $matched. Портативні копії (розпаковані без встановлення) не видно." "Programs on the list: $($KnownVulnerable.Count), installed: $matched. Portable copies (unpacked without installing) are not visible."
+                if (-not $hits) { return Ok (T 'не знайдено' 'none found') $note }
+                $sev = if ($hits | Where-Object Sev -eq 'high') { 'high' } else { 'medium' }
+                Issue $sev (T "$($hits.Count) шт." "$($hits.Count)") ((T 'Для цих версій є готові способи атаки. Оновіть їх у першу чергу, не чекаючи загального оновлення. ' 'Ready-made attacks exist for these versions. Update them first, without waiting for a general update. ') + $note) @($hits | ForEach-Object Line)
+            }
+            Explain = (T 'Більшість застарілих програм - це просто «є новіша версія». Але для деяких версій відома конкретна вразливість, яку вже використовують: достатньо відкрити надісланий архів або клонувати репозиторій. Архіватори (WinRAR, 7-Zip) самі не оновлюються - їх найчастіше й забувають.' 'Most outdated programs are merely "a newer version exists". But for some versions a specific vulnerability is known and already exploited: opening a received archive or cloning a repository is enough. Archivers (WinRAR, 7-Zip) do not update themselves - they are the most often forgotten.')
+            Pros = @((T 'Закриває діри, якими користуються просто зараз' 'Closes holes that are being exploited right now'))
+            Cons = @((T 'Список короткий і ведеться вручну - він доповнює, а не замінює перевірку оновлень' 'The list is short and maintained by hand - it complements the update check, not replaces it'))
+            Fix = @{ Recipe = 'app-updates'; Steps = @((T 'Оновіть програму з офіційного сайту або через winget upgrade <назва>. Портативні копії оновіть окремо - замініть папку новою версією.' 'Update the program from its official site or with winget upgrade <name>. Update portable copies separately - replace the folder with the new version.')) }
+        }
         @{
             Id = 'outdated-software'; Title = (T 'Застарілі версії програм' 'Outdated program versions')
             Prepare = { Start-Winget }

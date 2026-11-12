@@ -82,7 +82,8 @@ function Limited($r) {
 
 # Що можна прибрати (через карантин модуля Setup): кожен пункт - Kind + поля цілі + Label для списку в GUI.
 # Kind: Path (файл/папка) | RegistryKey | RegistryValue (Key, Name) | Service (Name) | Task (Key = TaskPath, Name) |
-#       PathEntry (Scope = Machine|User, Target = запис як у реєстрі) | FirewallRule (Target = програма як у правилі)
+#       PathEntry (Scope = Machine|User, Target = запис як у реєстрі) | FirewallRule (Target = програма як у правилі) |
+#       ThreatPath (слід загрози: окремий файл або папка всередині профілю програми - у карантину для нього свої правила)
 # Default - чи позначати пункт у списку одразу (зламані записи - так; «можливо залишки» - ні)
 function Add-Cleanup($r, $items) {
     $r.Cleanup = @($items | Where-Object { $_ })
@@ -373,6 +374,143 @@ function Format-Size([long]$b) {
 # Ноутбук/планшет: від цього залежить, наскільки важливе шифрування диска
 function Test-Portable {
     try { [bool](@((Get-CimInstance Win32_SystemEnclosure).ChassisTypes) | Where-Object { $_ -in 8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32 }) } catch { $false }
+}
+
+# ---------------------------------------------------------------- браузери (спільне для «Паролів і секретів» та «Слідів зламу»)
+
+# Папки даних браузерів на Chromium. Flat = профіль лежить просто в корені (Opera), інакше - у Default / Profile N
+$script:BrowserRoots = $null
+function Get-ChromiumRoots {
+    if ($null -eq $script:BrowserRoots) {
+        $l = $env:LOCALAPPDATA; $a = $env:APPDATA
+        $known = @(
+            @{ Name = 'Chrome'; Path = "$l\Google\Chrome\User Data" }, @{ Name = 'Chrome Beta'; Path = "$l\Google\Chrome Beta\User Data" }
+            @{ Name = 'Edge'; Path = "$l\Microsoft\Edge\User Data" }, @{ Name = 'Brave'; Path = "$l\BraveSoftware\Brave-Browser\User Data" }
+            @{ Name = 'Vivaldi'; Path = "$l\Vivaldi\User Data" }, @{ Name = 'Chromium'; Path = "$l\Chromium\User Data" }
+            @{ Name = 'Yandex'; Path = "$l\Yandex\YandexBrowser\User Data" }, @{ Name = 'Arc'; Path = "$l\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data" }
+            @{ Name = 'Opera'; Path = "$a\Opera Software\Opera Stable"; Flat = $true }, @{ Name = 'Opera GX'; Path = "$a\Opera Software\Opera GX Stable"; Flat = $true }
+        )
+        $script:BrowserRoots = @($known | Where-Object { Test-Path -LiteralPath $_.Path } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Path = $_.Path; Flat = [bool]$_.Flat } })
+    }
+    $script:BrowserRoots
+}
+
+# Профілі: @{ Browser; Label ('Edge / Profile 1'); Path }
+function Get-ChromiumProfiles {
+    foreach ($r in Get-ChromiumRoots) {
+        $dirs = @()
+        if ($r.Flat -and (Test-Path -LiteralPath (Join-Path $r.Path 'Preferences'))) { $dirs += Get-Item -LiteralPath $r.Path -Force }
+        $dirs += @(Get-ChildItem -LiteralPath $r.Path -Directory -Force -ErrorAction SilentlyContinue |
+                   Where-Object { ($_.Name -eq 'Default' -or $_.Name -like 'Profile *') -and (Test-Path -LiteralPath (Join-Path $_.FullName 'Preferences')) })
+        foreach ($d in $dirs) {
+            $label = if ($d.FullName -eq $r.Path -or $d.Name -eq 'Default') { $r.Name } else { "$($r.Name) / $($d.Name)" }
+            [pscustomobject]@{ Browser = $r.Name; Label = $label; Path = $d.FullName }
+        }
+    }
+}
+
+# Профілі Firefox і похідних: @{ Label; Path }
+function Get-FirefoxProfiles {
+    foreach ($b in @{ Name = 'Firefox'; Path = "$env:APPDATA\Mozilla\Firefox\Profiles" }, @{ Name = 'LibreWolf'; Path = "$env:APPDATA\librewolf\Profiles" },
+                   @{ Name = 'Zen'; Path = "$env:APPDATA\zen\Profiles" }, @{ Name = 'Waterfox'; Path = "$env:APPDATA\Waterfox\Profiles" }) {
+        foreach ($d in Get-ChildItem -LiteralPath $b.Path -Directory -Force -ErrorAction SilentlyContinue) {
+            [pscustomobject]@{ Label = "$($b.Name) / $($d.Name -replace '^[^.]+\.', '')"; Path = $d.FullName }
+        }
+    }
+}
+
+# Бази браузерів - SQLite. Читаємо вбудованою в Windows winsqlite3.dll, лише для читання і в режимі immutable:
+# файл не блокується, не копіюється і не змінюється, навіть коли браузер запущений. Паролі в базі зашифровані
+# і нас не цікавлять - беремо тільки назви сайтів і кількість записів.
+# Тут же - швидкий пошук файлів за розширенням з обмеженням кількості (профіль браузера - це сотні тисяч файлів кешу)
+$script:NativeReady = $false
+function Initialize-Native {
+    if ($script:NativeReady) { return }
+    Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.IO; using System.Runtime.InteropServices; using System.Text;
+public static class DeadPixelSqlite {
+    const string Dll = "winsqlite3.dll";
+    [DllImport(Dll)] static extern int sqlite3_open_v2(byte[] name, out IntPtr db, int flags, IntPtr vfs);
+    [DllImport(Dll)] static extern int sqlite3_close(IntPtr db);
+    [DllImport(Dll)] static extern int sqlite3_prepare_v2(IntPtr db, byte[] sql, int n, out IntPtr stmt, IntPtr tail);
+    [DllImport(Dll)] static extern int sqlite3_step(IntPtr stmt);
+    [DllImport(Dll)] static extern int sqlite3_finalize(IntPtr stmt);
+    [DllImport(Dll)] static extern int sqlite3_column_count(IntPtr stmt);
+    [DllImport(Dll)] static extern IntPtr sqlite3_column_text(IntPtr stmt, int col);
+    [DllImport(Dll)] static extern int sqlite3_column_bytes(IntPtr stmt, int col);
+    static byte[] Z(string s) { var b = Encoding.UTF8.GetBytes(s); Array.Resize(ref b, b.Length + 1); return b; }
+
+    // Рядки результату; null - якщо базу чи таблицю не вдалося прочитати
+    public static List<string[]> Query(string path, string sql, int maxRows) {
+        IntPtr db, stmt;
+        string uri = new Uri(path).AbsoluteUri + "?mode=ro&immutable=1";
+        if (sqlite3_open_v2(Z(uri), out db, 0x41, IntPtr.Zero) != 0) { if (db != IntPtr.Zero) sqlite3_close(db); return null; }   // READONLY | URI
+        try {
+            if (sqlite3_prepare_v2(db, Z(sql), -1, out stmt, IntPtr.Zero) != 0) return null;
+            var rows = new List<string[]>();
+            try {
+                int cols = sqlite3_column_count(stmt), rc;
+                while ((rc = sqlite3_step(stmt)) == 100 && rows.Count < maxRows) {   // SQLITE_ROW
+                    var row = new string[cols];
+                    for (int i = 0; i < cols; i++) {
+                        IntPtr p = sqlite3_column_text(stmt, i);
+                        int n = sqlite3_column_bytes(stmt, i);
+                        if (p == IntPtr.Zero || n <= 0) { row[i] = ""; continue; }
+                        var buf = new byte[n]; Marshal.Copy(p, buf, 0, n); row[i] = Encoding.UTF8.GetString(buf);
+                    }
+                    rows.Add(row);
+                }
+                if (rc != 100 && rc != 101) return null;   // не ROW і не DONE - база пошкоджена або зайнята
+            } finally { sqlite3_finalize(stmt); }
+            return rows;
+        } finally { sqlite3_close(db); }
+    }
+}
+public static class DeadPixelFind {
+    // Файли з потрібними розширеннями (".dll;.exe") під root; не йде в точки повторного розбору, зупиняється на maxScanned
+    public static List<string> ByExtension(string root, string extensions, int maxScanned) {
+        var want = new HashSet<string>(extensions.Split(';'), StringComparer.OrdinalIgnoreCase);
+        var res = new List<string>(); int seen = 0;
+        var stack = new Stack<string>(); stack.Push(root);
+        while (stack.Count > 0 && seen < maxScanned) {
+            var dir = stack.Pop();
+            try {
+                foreach (var f in new DirectoryInfo(dir).EnumerateFileSystemInfos()) {
+                    if ((f.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if ((f.Attributes & FileAttributes.Directory) != 0) stack.Push(f.FullName);
+                    else { seen++; if (want.Contains(f.Extension)) res.Add(f.FullName); }
+                }
+            } catch { }
+        }
+        return res;
+    }
+}
+'@
+    $script:NativeReady = $true
+}
+
+function Invoke-Sqlite([string]$Path, [string]$Sql, [int]$MaxRows = 20000) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    Initialize-Native
+    try { , [DeadPixelSqlite]::Query($Path, $Sql, $MaxRows) } catch { $null }
+}
+
+function Find-FilesByExtension([string]$Root, [string]$Extensions, [int]$MaxScanned = 400000) {
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return @() }
+    Initialize-Native
+    @([DeadPixelFind]::ByExtension($Root, $Extensions, $MaxScanned))
+}
+
+# Текст файлу, навіть якщо його тримає відкритим інша програма (журнали запущеного лаунчера). $null - не прочитати або завеликий
+function Read-SharedText([string]$Path, [long]$MaxBytes = 200MB) {
+    try {
+        $fs = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite, Delete')
+        try {
+            if ($fs.Length -gt $MaxBytes) { return $null }
+            $sr = New-Object IO.StreamReader $fs, ([Text.Encoding]::GetEncoding(28591))   # Latin-1: байт у символ без втрат - шукаємо ASCII-рядки
+            $sr.ReadToEnd()
+        } finally { $fs.Dispose() }
+    } catch { $null }
 }
 
 # ---------------------------------------------------------------- перевірки

@@ -5,6 +5,38 @@
 
 ## [Unreleased]
 
+Захист там, де антивірус сам не дістає: три нові області аудиту.
+*Protection where the antivirus alone does not reach: three new audit areas.*
+
+### Додано
+- Аудит: область **«Сліди зламу»** — індикатори відомих інцидентів (перший у списку — злам лаунчера NIKKE для ПК,
+  листопад 2026: запис реєстру, DLL у профілі браузера, рядок у журналі, завантажений файл, звернення до захопленого
+  домену), перехоплення COM-компонентів у розділі користувача, програми без дійсного підпису в профілях браузерів,
+  файл hosts, системний проксі, сторонні кореневі сертифікати. Знайдене прибирається через карантин.
+  *Signs of compromise: known-incident indicators, per-user COM hijacking, unsigned executables in browser profiles,
+  hosts file, system proxy, foreign root certificates.*
+- Аудит: область **«Паролі й секрети»** — паролі й платіжні картки, збережені в браузерах (з позначкою важливих
+  сайтів: пошта, банки, GitHub…), розширення браузерів із доступом до всіх сайтів і встановлені не з магазину,
+  токени у відкритих файлах (AWS, npm, Git, Docker, rclone та інші), ключі SSH без пароля, секрети у змінних
+  середовища, файли з паролями на Робочому столі й у Документах. Читаються лише адреси сайтів, імена файлів і
+  змінних — самі паролі й токени у звіт не потрапляють.
+  *Passwords and secrets: browser-saved passwords and cards, browser extensions, plain-text tokens, unprotected SSH
+  keys, secrets in environment variables, password files. Only names are read, never the secrets themselves.*
+- Аудит: область **«Посилений захист»** — правила зменшення поверхні атаки (ASR), мережевий захист Defender, захист
+  папок від програм-вимагачів, винятки антивіруса (з правами адміністратора), давність повного сканування,
+  Windows Script Host. *Hardening: ASR rules, Defender network protection, controlled folder access, antivirus
+  exclusions, full scan age, Windows Script Host.*
+- Аудит: перевірка **«Програми з відомими вразливостями»** — версії WinRAR, 7-Zip, PuTTY, Git, KeePass, AnyDesk,
+  Notepad++, для яких уже є способи атаки. *Programs with known exploited vulnerabilities.*
+- Сетап: рецепти `asr-rules` (15 правил ASR, кожне відкочується окремо), `network-protection`, `script-host-off`;
+  перші два додано в профіль «Безпека». *Setup recipes: `asr-rules`, `network-protection`, `script-host-off`.*
+
+### Змінено
+- Карантин приймає сліди загроз: COM-запис користувача (`HKCU\Software\Classes\CLSID\{…}`), окремий файл поза Windows
+  і Program Files, папку всередині папки програми в AppData. Решта обмежень без змін.
+  *Quarantine accepts threat traces: a per-user COM entry, a single file outside Windows and Program Files, a folder
+  inside a program's AppData folder.*
+
 ## [1.0.0] - 2026-10-27
 
 Аудит безпеки й стану системи з карантином для хвостів програм і англійська мова інтерфейсу.

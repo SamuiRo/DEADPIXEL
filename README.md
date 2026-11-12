@@ -34,6 +34,20 @@ replace, IFEO, WMI), programs and drivers (outdated versions via winget, unsuppo
 (free space, disks, restarts, restore points), program leftovers (services, tasks, drivers, PATH, firewall, startup,
 context menu, installed-program entries, folders with no program, old drivers in the driver store).
 
+Three areas cover what the antivirus alone does not:
+- **Hardening** — attack surface reduction (ASR) rules, Defender network protection, ransomware protection for folders,
+  antivirus exclusions, full scan age, Windows Script Host. Recipes: `asr-rules`, `network-protection`, `script-host-off`.
+- **Passwords and secrets** — what a password stealer would take from the PC: passwords and cards saved in browsers
+  (Chromium and Firefox; only site addresses and counts are read, databases are opened read-only with the built-in
+  `winsqlite3.dll`), browser extensions with access to all sites, tokens in plain-text files (`.aws\credentials`,
+  `.npmrc`, `.git-credentials`, Docker, rclone…), SSH keys without a passphrase, secrets in environment variables, files
+  named like "passwords.txt". Secret values are never read into the report — only file and variable names.
+- **Signs of compromise** — indicators of known incidents (the list lives in `checks/threats.ps1` and grows with releases;
+  the first entry is the 2026 NIKKE launcher compromise), per-user COM hijacking, unsigned executables in browser
+  profiles, the hosts file, the system proxy, foreign root certificates. Findings are removed through quarantine, which
+  has a narrow allowance for them: a per-user COM entry, a single file outside Windows and Program Files, a folder inside
+  a program's AppData folder.
+
 **Leftover cleanup goes through quarantine only.** The audit deletes nothing: "Clean up…" hands the selection to the Setup
 engine (`Setup.ps1 -Cleanup`, with UAC). Before each action the engine re-checks that the target is still a leftover and
 lies in an allowed place, then moves it to `data\quarantine\<date>`: files and folders physically, registry keys and
@@ -60,7 +74,7 @@ A scan takes a few seconds. Reports are in `data\audit\` (`latest.json`, `histor
 
 ```bat
 powershell -File Audit.ps1                      :: all checks; exit code = number of critical and high findings
-powershell -File Audit.ps1 -Area platform       :: one area (platform, windows, accounts, network, processes, software, health, leftovers)
+powershell -File Audit.ps1 -Area platform       :: one area (platform, windows, hardening, accounts, secrets, network, processes, threats, software, health, leftovers)
 powershell -File Audit.ps1 -Html report.html    :: the latest report as HTML
 powershell -File Audit.ps1 -Schedule 3          :: automatically every 3 days; 0 turns it off
 powershell -File Audit.ps1 -Check hvci,uac      :: specific checks

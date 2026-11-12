@@ -15,6 +15,8 @@ function Get-QuarantineRoot {
 $RegAllowed = @(
     '^HK(LM|CU):\\SOFTWARE\\(WOW6432Node\\)?Microsoft\\Windows\\CurrentVersion\\Uninstall\\[^\\]+$'
     '^HK(LM|CU):\\SOFTWARE\\Classes\\(\*|Directory|Directory\\Background|Folder|Drive|AllFilesystemObjects)\\shellex\\ContextMenuHandlers\\[^\\]+$'
+    # COM-компонент, зареєстрований лише для користувача (Аудит → «Сліди зламу»). Системні (HKLM) - ніколи
+    '^HKCU:\\Software\\Classes\\(WOW6432Node\\)?CLSID\\\{[0-9A-Fa-f-]{36}\}$'
 )
 $RunKeys = '^HK(LM|CU):\\Software\\(WOW6432Node\\)?Microsoft\\Windows\\CurrentVersion\\Run(Once)?$'
 
@@ -51,6 +53,28 @@ function Assert-CleanupTarget($it) {
             if ($self -eq $l -or $self.StartsWith($l + '\')) { throw (T 'тут встановлено DEADPIXEL' 'DEADPIXEL is installed here') }
             $run = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLowerInvariant().StartsWith($l + '\') })
             if ($run) { throw (T "з цієї папки зараз працює $($run[0].Name)" "$($run[0].Name) is running from this folder") }
+        }
+        # Слід загрози (Аудит → «Сліди зламу»): підкинутий файл або папка всередині профілю програми, а не вся програма.
+        # Дозволено: окремий файл поза Windows і Program Files; папка - лише вкладена в папку програми в AppData
+        # (щонайменше на два рівні нижче кореня AppData: цілі папки програм - це вже «Path» з його правилами)
+        'ThreatPath' {
+            $p = [IO.Path]::GetFullPath($it.Target).TrimEnd('\'); $l = $p.ToLowerInvariant()
+            if (-not (Test-Path -LiteralPath $p)) { throw (T 'вже немає' 'already gone') }
+            if (Test-InWindows $p) { throw (T 'це папка Windows' 'this is a Windows folder') }
+            foreach ($pf in $env:ProgramFiles, ${env:ProgramFiles(x86)} | Where-Object { $_ }) {
+                if ($l.StartsWith($pf.ToLowerInvariant() + '\')) { throw (T 'файли в Program Files карантин слідів не чіпає' 'threat quarantine does not touch files in Program Files') }
+            }
+            $self = (Split-Path (Split-Path $PSScriptRoot)).ToLowerInvariant()
+            if ($l -eq $self -or $l.StartsWith($self + '\') -or $self.StartsWith($l + '\')) { throw (T 'тут встановлено DEADPIXEL' 'DEADPIXEL is installed here') }
+            if (Test-Path -LiteralPath $p -PathType Container) {
+                $root = @($env:LOCALAPPDATA, $env:APPDATA) | Where-Object { $_ -and $l.StartsWith($_.ToLowerInvariant() + '\') } | Select-Object -First 1
+                if (-not $root) { throw (T 'папку можна прибрати лише всередині AppData' 'a folder can be removed only inside AppData') }
+                $depth = @($p.Substring($root.Length).Trim('\') -split '\\').Count
+                if ($depth -lt 2) { throw (T 'це ціла папка програми, а не слід у ній' 'this is a whole program folder, not a trace inside it') }
+                if ((Split-Path $p -Leaf) -match '^(microsoft|windows|packages|programs|temp|user data|default|profile \d+)$') { throw (T 'службова папка' 'a system folder') }
+                $run = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.ToLowerInvariant().StartsWith($l + '\') })
+                if ($run) { throw (T "з цієї папки зараз працює $($run[0].Name)" "$($run[0].Name) is running from this folder") }
+            }
         }
         'RegistryKey' {
             if (-not ($RegAllowed | Where-Object { $it.Target -match $_ })) { throw (T 'цей розділ реєстру карантин не чіпає' 'quarantine does not touch this registry key') }
@@ -138,7 +162,7 @@ function Get-FirewallIndex {
 # Переносить одну ціль у карантин; повертає, що збережено для відновлення
 function Move-ToQuarantine($it, [string]$dir, [int]$n) {
     switch ($it.Kind) {
-        'Path' {
+        { $_ -in 'Path', 'ThreatPath' } {
             $src = [IO.Path]::GetFullPath($it.Target).TrimEnd('\')
             $dst = Join-Path $dir "files\$n"
             New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
@@ -248,7 +272,7 @@ function Restore-Quarantine([string]$id) {
         $it = $rec.Item; $sv = $rec.Saved
         try {
             switch ($rec.Kind) {
-                'Path' {
+                { $_ -in 'Path', 'ThreatPath' } {
                     if ((Test-Path -LiteralPath $sv.Original) -and -not $sv.Partial) { throw (T "на місці вже є $($sv.Original)" "$($sv.Original) already exists") }
                     $from = Join-Path $s.Dir $sv.Stored
                     if (Test-Path -LiteralPath $from -PathType Leaf) { Move-Item -LiteralPath $from -Destination $sv.Original }
