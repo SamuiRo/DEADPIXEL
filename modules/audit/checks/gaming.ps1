@@ -17,6 +17,7 @@ $script:AntiCheats = @(
     @{ Match = '^atvi-randgrid_sr$'; Name = 'Ricochet (Activision)'; Games = 'Call of Duty'; Remove = (T 'видаляється разом із грою' 'removed with the game') }
     @{ Match = '^EQU8_HELPER_\d+$'; Name = 'EQU8'; Games = 'Splitgate…'; Remove = (T 'видаляється разом із грою; якщо гри вже немає - «Прибрати…»' 'removed with the game; if the game is gone - "Clean up…"') }
     @{ Match = '^PnkBstr[AB]$'; Name = 'PunkBuster'; Games = (T 'старі Battlefield' 'older Battlefield titles'); Remove = (T 'pbsvc.exe → Uninstall або «Прибрати…»' 'pbsvc.exe → Uninstall, or "Clean up…"') }
+    @{ Match = '^BlackCat\d*$'; Name = 'Nexon Game Security (NGS)'; Games = 'MapleStory, The First Descendant…'; Remove = (T 'видаляється разом із грою; якщо гри вже немає - «Прибрати…»' 'removed with the game; if the game is gone - "Clean up…"') }
     @{ Match = '^HtAntiCheatDriver$'; Name = (T 'античіт гри (HT)' 'game anti-cheat (HT)'); Games = 'Neverness To Everness…'; Remove = (T 'видаляється разом із грою; якщо гри вже немає - «Прибрати…»' 'removed with the game; if the game is gone - "Clean up…"') }
 )
 
@@ -47,8 +48,31 @@ $script:SvcIndex = $null
 function Get-ServiceEntry([string]$Name) {
     if ($null -eq $script:SvcIndex) {
         $script:SvcIndex = @{}
-        foreach ($d in Get-CimInstance Win32_SystemDriver -ErrorAction SilentlyContinue) { $script:SvcIndex[$d.Name.ToLowerInvariant()] = [pscustomobject]@{ Name = $d.Name; Kernel = $true; State = $d.State; Start = $d.StartMode; Path = (Resolve-DriverPath $d.PathName) } }
-        foreach ($s in Get-CimInstance Win32_Service -ErrorAction SilentlyContinue) { $script:SvcIndex[$s.Name.ToLowerInvariant()] = [pscustomobject]@{ Name = $s.Name; Kernel = $false; State = $s.State; Start = $s.StartMode; Path = (Get-ExeFromCommand $s.PathName) } }
+        # Джерело - реєстр, а не диспетчер служб: драйвер, який гра прописала напряму в реєстр (або який лишився після
+        # неї), диспетчер не знає - його не показують ні sc, ні WMI, ні services.msc. Саме так ховаються хвости античітів.
+        # Scm = $false - запис є лише в реєстрі. Стан беремо з WMI, де він є
+        $live = @{}
+        foreach ($d in Get-CimInstance Win32_SystemDriver -ErrorAction SilentlyContinue) { $live[$d.Name.ToLowerInvariant()] = $d.State }
+        foreach ($s in Get-CimInstance Win32_Service -ErrorAction SilentlyContinue) { $live[$s.Name.ToLowerInvariant()] = $s.State }
+        $starts = @{ 0 = 'Boot'; 1 = 'System'; 2 = 'Auto'; 3 = 'Manual'; 4 = 'Disabled' }
+        $root = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Services')
+        foreach ($n in $root.GetSubKeyNames()) {
+            $k = $root.OpenSubKey($n)
+            if (-not $k) { continue }
+            $type = $k.GetValue('Type'); $img = [string]$k.GetValue('ImagePath'); $start = $k.GetValue('Start')
+            $k.Close()
+            if ($type -isnot [int] -or -not $img) { continue }
+            $kernel = [bool]($type -band 0xB)   # 1 - драйвер ядра, 2 - файлової системи, 8 - розпізнавач ФС
+            if (-not $kernel -and -not ($type -band 0x30)) { continue }   # 0x10 / 0x20 - служби Win32
+            $key = $n.ToLowerInvariant()
+            $script:SvcIndex[$key] = [pscustomobject]@{
+                Name = $n; Kernel = $kernel; Scm = $live.ContainsKey($key)
+                State = $(if ($live.ContainsKey($key)) { $live[$key] } else { 'Stopped' })
+                Start = $(if ($start -is [int] -and $starts.ContainsKey($start)) { $starts[$start] } else { 'Manual' })
+                Path = $(if ($kernel) { Resolve-DriverPath $img } else { Get-ExeFromCommand $img })
+            }
+        }
+        $root.Close()
     }
     $script:SvcIndex[$Name.ToLowerInvariant()]
 }
@@ -61,7 +85,10 @@ function Format-ServiceState($e) {
 
 # Пункт для карантину: файлу вже немає - звичайний «хвіст» (Service); файл є - лише служба зі списку (DriverService)
 function New-ServiceCleanup($e, [string]$Label) {
-    $kind = if ($e.Path -and (Test-Path -LiteralPath $e.Path)) { 'DriverService' } else { 'Service' }
+    # Service (звичайний хвіст) карантин приймає лише для файлу поза папкою Windows; античіт, що лежав у System32
+    # (GameGuard), іде як DriverService - за списком імен
+    $gone = $e.Path -and -not (Test-Path -LiteralPath $e.Path)
+    $kind = if ($gone -and -not (Test-UnderWindows $e.Path)) { 'Service' } else { 'DriverService' }
     New-CleanupItem $kind $Label @{ Name = $e.Name } $false
 }
 
@@ -75,10 +102,10 @@ function New-ServiceCleanup($e, [string]$Label) {
                 foreach ($e in Get-AllServiceEntries) {
                     $ac = $AntiCheats | Where-Object { $e.Name -match $_.Match } | Select-Object -First 1
                     if (-not $ac) { continue }
-                    $found += [pscustomobject]@{ Ac = $ac; E = $e; Missing = -not ($e.Path -and (Test-Path -LiteralPath $e.Path)); Always = $e.Start -in 'Boot', 'System', 'Auto' }
+                    $found += [pscustomobject]@{ Ac = $ac; E = $e; Missing = [bool]($e.Path -and [IO.Path]::IsPathRooted($e.Path) -and -not (Test-Path -LiteralPath $e.Path)); Always = $e.Start -in 'Boot', 'System', 'Auto' }
                 }
                 if (-not $found) { return Ok (T 'не знайдено' 'none found') }
-                $ev = @(); $running = 0; $always = 0
+                $ev = @(); $running = 0; $always = 0; $orphans = 0
                 foreach ($g in $found | Group-Object { $_.Ac.Name } | Sort-Object Name) {
                     $ac = $g.Group[0].Ac
                     $ev += "● $($ac.Name) - " + (T 'ігри: ' 'games: ') + "$($ac.Games). " + (T 'Прибрати: ' 'Remove: ') + $ac.Remove
@@ -86,14 +113,19 @@ function New-ServiceCleanup($e, [string]$Label) {
                         if ($x.E.State -eq 'Running') { $running++ }
                         if ($x.Always) { $always++ }
                         $mark = if ($x.E.State -eq 'Running' -or $x.Always -or $x.Missing) { '⚠' } else { ' ' }
-                        $ev += "   $mark $($x.E.Name) " + $(if ($x.E.Kernel) { T '(драйвер ядра)' '(kernel driver)' } else { T '(служба)' '(service)' }) + " - $(Format-ServiceState $x.E)" + $(if ($x.Missing) { T ', файлу вже немає' ', the file is gone' } else { " - $($x.E.Path)" })
-                        if ($x.E.State -ne 'Running') { $items += New-ServiceCleanup $x.E "$($ac.Name): $($x.E.Name)" }
+                        if ($x.Missing) { $orphans++ }
+                        $ev += "   $mark $($x.E.Name) " + $(if ($x.E.Kernel) { T '(драйвер ядра)' '(kernel driver)' } else { T '(служба)' '(service)' }) + " - $(Format-ServiceState $x.E)" +
+                               $(if ($x.Missing) { (T ', ХВІСТ: файлу вже немає - ' ', LEFTOVER: the file is gone - ') + $x.E.Path } else { " - $($x.E.Path)" }) +
+                               $(if (-not $x.E.Scm) { T ' [лише в реєстрі: не видно в «Службах»]' ' [registry only: not shown in Services]' })
+                        # Хвіст (файлу немає) позначаємо у списку одразу; живий античіт - лише на вибір користувача
+                        if ($x.E.State -ne 'Running') { $it = New-ServiceCleanup $x.E "$($ac.Name): $($x.E.Name)"; $it.Default = $x.Missing; $items += $it }
                     }
                 }
                 $products = @($found | ForEach-Object { $_.Ac.Name } | Sort-Object -Unique).Count
                 $value = T "$products античітів, служб і драйверів: $($found.Count)" "$products anti-cheats, services and drivers: $($found.Count)"
                 $detail = T 'Античіт рівня ядра - це драйвер із найвищими правами в системі. Поки гра встановлена, це плата за чесну гру. Але після видалення гри драйвер часто лишається: без оновлень, з повним доступом до пам''яті, і будь-яка вразливість у ньому стає дірою в ядрі (так було з mhyprot2 від Genshin Impact, яким вимикали антивіруси). Залиште античіти ігор, у які граєте; решту приберіть.' 'A kernel-level anti-cheat is a driver with the highest rights in the system. While the game is installed, that is the price of fair play. But after the game is removed the driver often stays: without updates, with full memory access, and any vulnerability in it becomes a kernel hole (as happened with Genshin Impact''s mhyprot2, used to switch off antiviruses). Keep the anti-cheats of games you play; remove the rest.'
-                $r = if ($running -or $always) { Issue low ($value + (T ", працює зараз: $running, зі стартом Windows: $always" ", running now: $running, at Windows boot: $always")) ((T 'Позначені ⚠ працюють просто зараз або вантажаться разом із Windows, навіть коли ви не граєте. ' 'Those marked ⚠ run right now or load with Windows even when you are not playing. ') + $detail) $ev }
+                $r = if ($orphans) { Issue medium ($value + (T ", хвостів: $orphans" ", leftovers: $orphans")) ((T 'Гру видалено, а запис її драйвера ядра лишився (ХВІСТ). Windows досі готова завантажити драйвер з цього шляху з правами ядра: якщо папку можна створити знову, туди можна підкласти свій файл. Приберіть такі записи кнопкою «Прибрати…». ' 'The game was removed, but its kernel driver entry stayed (LEFTOVER). Windows is still ready to load a driver from that path with kernel rights: if the folder can be created again, a file can be planted there. Remove such entries with "Clean up…". ') + $detail) $ev }
+                     elseif ($running -or $always) { Issue low ($value + (T ", працює зараз: $running, зі стартом Windows: $always" ", running now: $running, at Windows boot: $always")) ((T 'Позначені ⚠ працюють просто зараз або вантажаться разом із Windows, навіть коли ви не граєте. ' 'Those marked ⚠ run right now or load with Windows even when you are not playing. ') + $detail) $ev }
                      else { Issue info $value $detail $ev }
                 Add-Cleanup $r $items
             }

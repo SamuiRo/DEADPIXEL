@@ -57,6 +57,16 @@ $script:SkipFolders = '^(microsoft.*|windows.*|common files|internet explorer|mo
                     $ev += (T 'Драйвер ' 'Driver ') + "$($d.DisplayName) ($($d.Name)) - $sys"
                     $items += New-CleanupItem 'Service' (T "Драйвер «$($d.DisplayName)» ($($d.Name))" "Driver '$($d.DisplayName)' ($($d.Name))") @{ Name = $d.Name }
                 }
+                # Записи, яких диспетчер служб не знає (є лише в реєстрі): їх не видно в «Службах», а Windows
+                # однаково може завантажити драйвер з цього шляху. Типовий хвіст античітів і утиліт
+                foreach ($e in Get-AllServiceEntries | Where-Object { -not $_.Scm } | Sort-Object Name) {
+                    if (-not $e.Path -or -not [IO.Path]::IsPathRooted($e.Path) -or (Test-UnderWindows $e.Path) -or (Test-Path -LiteralPath $e.Path)) { continue }
+                    $create = Test-CreatableByUsers $e.Path
+                    if ($create -and $e.Kernel) { $danger = $true }
+                    $what = if ($e.Kernel) { T 'Драйвер ' 'Driver ' } else { T 'Служба ' 'Service ' }
+                    $ev += $(if ($create) { '⚠ ' } else { '' }) + "$what$($e.Name) - $($e.Path)  [" + (T 'лише в реєстрі, файлу немає' 'registry only, the file is missing') + $(if ($create) { T '; створити файл може будь-яка програма' '; any program can create the file' }) + ']'
+                    $items += New-CleanupItem 'Service' ($what + $e.Name) @{ Name = $e.Name }
+                }
                 if (-not $items) { return Ok (T 'немає' 'none') }
                 $r = if ($danger) { Issue high (T "$($items.Count) шт." "$($items.Count)") (T 'Службу видаленої програми Windows досі пробує запускати. Якщо її файлу немає, а папка відкрита на запис, будь-яка програма може покласти туди свій файл - і він запуститься з правами системи.' 'Windows still tries to start a service of a removed program. If its file is missing and the folder is writable, any program can put its own file there - and it will run with system rights.') $ev }
                      else { Issue low (T "$($items.Count) шт." "$($items.Count)") (T 'Windows під час старту пробує запустити службу, якої вже немає: зайвий запис у журналі помилок і секунда до завантаження.' 'At startup Windows tries to start a service that no longer exists: an extra error log entry and a second added to boot.') $ev }

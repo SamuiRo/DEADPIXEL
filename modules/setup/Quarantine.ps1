@@ -21,7 +21,7 @@ $RegAllowed = @(
 # Служби й драйвери, які можна прибрати, хоча їхній файл на місці: античіти рівня ядра і драйвери емуляторів
 # (Аудит → «Ігри й емулятори»). Лише ці імена - жодної іншої «живої» служби карантин не чіпає.
 # Перелік має збігатися з modules\audit\checks\gaming.ps1
-$DriverServiceAllowed = '(?i)^(vgk|vgc|EasyAntiCheat(_EOS|Sys)?|BEService|BEDaisy|ACE-[A-Z]+\d*|AntiCheatExpert Protection|SGuard(64|Svc64)?|TesSafe|mhyprot[23]?|HoYoProtect|HoYoKProtect|FACEIT|faceit[\w.-]*|ESEADriver\d*|npggsvc|GameMon|npptNT2|xhunter1|xigncode[\w.-]*|EAAntiCheatService|eaanticheat|atvi-randgrid_sr|EQU8_HELPER_\d+|PnkBstr[AB]|HtAntiCheatDriver|BlueStacksDrv(_nxt)?|BstHdDrv|BstkDrv|BstHdLogRotatorSvc|NoxVMSVC|XQHDrv|YSDrv|Ld9BoxSup|LdVBoxDrv|LdBoxDrv|MEmuSVC|MEmuDrv|NemuDrv|NemuVMMDrv|MuMuVMMDrv|MuMuVMMNetAdp|aow_drv|QMEmulatorService|aehd|gvm|IntelHaxm|VBoxSup|VBoxDrv|VBoxNetAdp|VBoxNetLwf|VBoxUSBMon|VBoxSDS|GooglePlayGamesServices)$'
+$DriverServiceAllowed = '(?i)^(vgk|vgc|EasyAntiCheat(_EOS|Sys)?|BEService|BEDaisy|ACE-[A-Z]+\d*|AntiCheatExpert Protection|SGuard(64|Svc64)?|TesSafe|mhyprot[23]?|HoYoProtect|HoYoKProtect|FACEIT|faceit[\w.-]*|ESEADriver\d*|npggsvc|GameMon|npptNT2|xhunter1|xigncode[\w.-]*|EAAntiCheatService|eaanticheat|atvi-randgrid_sr|EQU8_HELPER_\d+|PnkBstr[AB]|BlackCat\d*|HtAntiCheatDriver|BlueStacksDrv(_nxt)?|BstHdDrv|BstkDrv|BstHdLogRotatorSvc|NoxVMSVC|XQHDrv|YSDrv|Ld9BoxSup|LdVBoxDrv|LdBoxDrv|MEmuSVC|MEmuDrv|NemuDrv|NemuVMMDrv|MuMuVMMDrv|MuMuVMMNetAdp|aow_drv|QMEmulatorService|aehd|gvm|IntelHaxm|VBoxSup|VBoxDrv|VBoxNetAdp|VBoxNetLwf|VBoxUSBMon|VBoxSDS|GooglePlayGamesServices)$'
 $RunKeys = '^HK(LM|CU):\\Software\\(WOW6432Node\\)?Microsoft\\Windows\\CurrentVersion\\Run(Once)?$'
 
 # Шлях файлу служби / драйвера з ImagePath
@@ -198,7 +198,9 @@ function Move-ToQuarantine($it, [string]$dir, [int]$n) {
             $f = "reg-$n.reg"
             Export-RegKey "HKLM:\SYSTEM\CurrentControlSet\Services\$($it.Name)" (Join-Path $dir $f)
             $code = Invoke-Native sc.exe @('delete', $it.Name)
-            if ($code -notin 0, 1072) { throw "sc delete: $code" }   # 1072 - уже позначена до видалення
+            # 1060 - диспетчер служб такої не знає: запис є лише в реєстрі (типовий хвіст драйвера гри) - прибираємо сам розділ
+            if ($code -eq 1060) { Remove-Item -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$($it.Name)" -Recurse -Force }
+            elseif ($code -notin 0, 1072) { throw "sc delete: $code" }   # 1072 - уже позначена до видалення
             return @{ RegFile = $f }
         }
         'RegistryValue' {
