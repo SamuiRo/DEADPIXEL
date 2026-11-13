@@ -108,6 +108,32 @@ $script:Incidents = @(
     }
 )
 
+# ---------------------------------------------------------------- проксі
+
+# Програми й SDK, що здають ПК в оренду як проксі-вузол: шаблон (ім'я процесу, служби, програми, автозапуску) → назва.
+# Botnet - програми ботнету 911 S5 з попередження ФБР (травень 2024)
+$script:Proxyware = @(
+    @{ Match = '(?i)\b(MaskVPN|DewVPN|PaladinVPN|ProxyGate|ShieldVPN|ShineVPN)\b'; Name = '911 S5'; What = (T 'ботнет під виглядом безкоштовного VPN' 'a botnet posing as a free VPN'); Botnet = $true }
+    @{ Match = '(?i)honeygain'; Name = 'Honeygain'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)packetstream'; Name = 'PacketStream'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)\bpawns(\.app)?\b|iproyal'; Name = 'Pawns.app (IPRoyal)'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)earnapp'; Name = 'EarnApp (Bright Data)'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)peer2profit'; Name = 'Peer2Profit'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)repocket'; Name = 'Repocket'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)traffmonetizer'; Name = 'Traffmonetizer'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)proxyrack|peerproxy'; Name = 'ProxyRack'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)bytelixir'; Name = 'ByteLixir'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)speedshare'; Name = 'SpeedShare'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)nodepay'; Name = 'Nodepay'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)getgrass|wynd ?labs|\bgrass(\.exe| desktop| node)'; Name = 'Grass'; What = (T 'продаж вашого каналу' 'sells your bandwidth') }
+    @{ Match = '(?i)mysterium|\bmyst(-launcher|\.exe)'; Name = 'Mysterium Node'; What = (T 'вузол виходу чужого трафіку' 'an exit node for other people''s traffic') }
+    @{ Match = '(?i)brd_sdk|brightdata|bright ?sdk|luminati|net_updater(32|64)?\.exe|lum_sdk'; Name = 'Bright Data SDK'; What = (T 'SDK проксі-мережі всередині безкоштовної програми' 'a proxy network SDK inside a free app') }
+    @{ Match = '(?i)hola_svc|hola_cr|hola vpn|hola\.exe'; Name = 'Hola VPN'; What = (T 'безкоштовна версія пропускає чужий трафік (мережа Bright Data)' 'the free tier relays other people''s traffic (the Bright Data network)') }
+    @{ Match = '(?i)infatica'; Name = 'Infatica SDK'; What = (T 'SDK проксі-мережі всередині безкоштовної програми' 'a proxy network SDK inside a free app') }
+    @{ Match = '(?i)globalhop'; Name = 'Globalhop SDK'; What = (T 'SDK проксі-мережі всередині безкоштовної програми' 'a proxy network SDK inside a free app') }
+    @{ Match = '(?i)digital ?pulse|proxynation'; Name = 'Digital Pulse'; What = (T 'проксі-вузол, що ставиться без згоди' 'a proxy node installed without consent') }
+)
+
 # ---------------------------------------------------------------- COM
 
 # Шлях до файлу із запису InprocServer32 / LocalServer32; $null - це не шлях (наприклад, ідентифікатор програми з Магазину)
@@ -322,6 +348,78 @@ function Get-UserRootCerts {
             Pros = @((T 'Видно, якщо трафік тихо завернули через чужий сервер' 'Reveals traffic silently routed through a foreign server'))
             Cons = @((T 'Вимкнення проксі зламає VPN або робочий доступ, які його використовують' 'Turning the proxy off breaks a VPN or work access that relies on it'))
             Fix = @{ Open = 'ms-settings:network-proxy' }
+        }
+        @{
+            Id = 'proxyware'; Title = (T 'ПК як чужий проксі-сервер' 'The PC as someone else''s proxy')
+            Test = {
+                $hits = @{}; $botnet = $false
+                $add = {
+                    param([string]$text, [string]$where)
+                    foreach ($p in $Proxyware) {
+                        if ($text -notmatch $p.Match) { continue }
+                        if ($p.Botnet) { Set-Variable botnet $true -Scope 1 }
+                        $key = "$($p.Name) - $($p.What)"
+                        if (-not $hits.ContainsKey($key)) { $hits[$key] = @() }
+                        $hits[$key] += $where
+                        break
+                    }
+                }
+                foreach ($p in (Get-ProcessTable).Values) { if ($p.Name) { & $add "$($p.Name) $($p.ExecutablePath)" ((T 'процес ' 'process ') + "$($p.Name) (PID $($p.ProcessId))") } }
+                foreach ($s in Get-CimInstance Win32_Service -ErrorAction SilentlyContinue) { & $add "$($s.Name) $($s.DisplayName) $($s.PathName)" ((T 'служба ' 'service ') + "$($s.Name), $($s.State)") }
+                foreach ($a in Get-InstalledApps) { & $add "$($a.DisplayName)" ((T 'встановлено: ' 'installed: ') + $a.DisplayName) }
+                foreach ($k in 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run') {
+                    $pr = Get-ItemProperty $k -ErrorAction SilentlyContinue
+                    if ($pr) { foreach ($x in $pr.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' }) { & $add "$($x.Name) $($x.Value)" ((T 'автозапуск ' 'startup ') + $x.Name) } }
+                }
+                foreach ($t in Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskPath -notlike '\Microsoft\*' }) { & $add "$($t.TaskName) $(@($t.Actions | ForEach-Object { $_.Execute }) -join ' ')" ((T 'завдання ' 'task ') + $t.TaskName) }
+                if ($hits.Count -eq 0) { return Limited (Ok (T 'не знайдено' 'none found') (T "Перевірено за списком із $($Proxyware.Count) відомих програм і SDK." "Checked against a list of $($Proxyware.Count) known programs and SDKs.")) }
+                $ev = foreach ($k in $hits.Keys | Sort-Object) { "⚠ $k"; $hits[$k] | Sort-Object -Unique | Select-Object -First 6 | ForEach-Object { "     $_" } }
+                if ($botnet) { return Issue high (T "$($hits.Count) шт." "$($hits.Count)") (T 'Знайдено програму з ботнету 911 S5: «безкоштовний VPN», який продавав доступ до ПК користувачів як проксі для шахрайства (ліквідований ФБР у 2024). Видаліть її, зробіть повне сканування і перевірте, чи ваша IP-адреса не потрапила в чорні списки.' 'A program from the 911 S5 botnet was found: a "free VPN" that sold access to users'' PCs as proxies for fraud (taken down by the FBI in 2024). Remove it, run a full scan and check whether your IP address was blacklisted.') $ev }
+                Issue medium (T "$($hits.Count) шт." "$($hits.Count)") (T 'Ці програми пропускають через ваш ПК і вашу IP-адресу чужий інтернет-трафік: за гроші («заробіток на інтернеті») або непомітно, як плата за «безкоштовний» VPN чи програму. Що саме йде через вашу адресу, ви не контролюєте - шахрайство, обхід блокувань, атаки на сайти записуються на вас. Якщо ставили свідомо - додайте в «Ігнорувати».' 'These programs route other people''s internet traffic through your PC and your IP address: for money ("earn from your internet") or quietly, as the price of a "free" VPN or app. You do not control what goes through your address - fraud, block evasion, attacks on sites are attributed to you. If you installed it knowingly, add it to "Ignore".') $ev
+            }
+            Explain = (T '«Резидентні проксі» - це мережі з домашніх ПК, через які клієнти сервісу виходять в інтернет з чужої адреси. ПК потрапляє туди трьома шляхами: програма «пасивного заробітку» (Honeygain, Pawns, EarnApp), SDK у безкоштовній програмі чи VPN (Bright Data, Infatica - згода захована в ліцензії) або шкідлива програма. Перевірка разова й порівнює процеси, служби, програми й автозапуск зі списком - ПК вона не навантажує.' '"Residential proxies" are networks of home PCs through which a service''s customers reach the internet from someone else''s address. A PC ends up there in three ways: a "passive income" app (Honeygain, Pawns, EarnApp), an SDK inside a free app or VPN (Bright Data, Infatica - consent buried in the license) or malware. The check is one-off and compares processes, services, programs and startup entries against a list - it puts no load on the PC.')
+            Pros = @((T 'Ваша IP-адреса не відповідає за чужі дії' 'Your IP address does not answer for other people''s actions'), (T 'Канал і трафік лишаються вашими' 'Your bandwidth and traffic stay yours'))
+            Cons = @((T 'Список неповний: нову або перейменовану програму він не впізнає - тому поруч є перевірка «Пересилання трафіку»' 'The list is incomplete: it will not recognize a new or renamed program - hence the "Traffic forwarding" check next to it'), (T '«Безкоштовна» програма без свого SDK може попросити оплату або перестати працювати' 'A "free" app without its SDK may ask for payment or stop working'))
+            Fix = @{ Open = 'ms-settings:appsfeatures'; Steps = @((T 'Видаліть програму через «Програми». Якщо це SDK усередині іншої програми (Bright Data в безкоштовних VPN і програвачах) - вимкніть «ділитися ресурсами» в її налаштуваннях або видаліть і її.' 'Uninstall the program through Apps. If it is an SDK inside another program (Bright Data in free VPNs and players), turn off "share resources" in its settings or remove that program too.')) }
+        }
+        @{
+            Id = 'traffic-forwarding'; Title = (T 'Пересилання трафіку через ПК' 'Traffic forwarding through the PC')
+            Test = {
+                $ev = @(); $sev = $null
+                # Правила netsh portproxy: вхідні з'єднання на порт ПК пересилаються на іншу адресу
+                foreach ($k in Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\PortProxy' -Recurse -ErrorAction SilentlyContinue) {
+                    foreach ($n in $k.GetValueNames()) {
+                        $to = [string]$k.GetValue($n)
+                        $local = $n -match '^(127\.|localhost|::1)' -or $to -match '^(127\.|localhost|::1|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|10\.)'
+                        $ev += $(if ($local) { '' } else { '⚠ ' }) + (T 'Правило пересилання: ' 'Forwarding rule: ') + "$n → $to"
+                        if (-not $local) { $sev = 'medium' } elseif (-not $sev) { $sev = 'info' }
+                    }
+                }
+                if ([int](Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' 'IPEnableRouter') -eq 1) {
+                    $ev += (T 'Маршрутизацію IP увімкнено: ПК пересилає пакети між мережами (потрібно для спільного доступу, Hyper-V, деяких VPN).' 'IP routing is on: the PC forwards packets between networks (needed for connection sharing, Hyper-V, some VPNs).')
+                    if (-not $sev) { $sev = 'info' }
+                }
+                $ics = Get-Service SharedAccess -ErrorAction SilentlyContinue
+                if ($ics -and $ics.Status -eq 'Running') { $ev += (T 'Спільний доступ до інтернету (ICS) працює: інші пристрої виходять в інтернет через цей ПК (мобільний хот-спот).' 'Internet Connection Sharing (ICS) is running: other devices reach the internet through this PC (mobile hotspot).'); if (-not $sev) { $sev = 'info' } }
+                # Типові порти проксі-серверів, відкриті для всієї мережі
+                $ports = @{ 1080 = 'SOCKS'; 1081 = 'SOCKS'; 3128 = 'HTTP proxy'; 8118 = 'Privoxy'; 8888 = 'HTTP proxy'; 9050 = 'Tor SOCKS'; 9150 = 'Tor SOCKS'; 10808 = 'SOCKS (v2ray)'; 10809 = 'HTTP (v2ray)'; 7890 = 'Clash'; 3389 = $null }
+                $procs = Get-ProcessTable
+                foreach ($c in Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ports[[int]$_.LocalPort] -and $_.LocalAddress -in '0.0.0.0', '::' } | Sort-Object LocalPort -Unique) {
+                    $p = $procs[[int]$c.OwningProcess]
+                    $ev += '⚠ ' + (T "Порт $($c.LocalPort) ($($ports[[int]$c.LocalPort])) відкритий для всієї мережі - " "Port $($c.LocalPort) ($($ports[[int]$c.LocalPort])) is open to the whole network - ") + $(if ($p) { "$($p.Name) (PID $($c.OwningProcess))" } else { "PID $($c.OwningProcess)" })
+                    if ($sev -ne 'medium') { $sev = 'low' }
+                }
+                if (-not $ev) { return Ok (T 'не знайдено' 'none found') }
+                if ($sev -eq 'info') { return Issue info (T "$($ev.Count) шт." "$($ev.Count)") (T 'ПК налаштований пересилати трафік, але лише всередині себе або домашньої мережі. Нормально для WSL, Docker, Hyper-V і хот-спота - якщо ви ними користуєтеся.' 'The PC is set to forward traffic, but only within itself or the home network. Normal for WSL, Docker, Hyper-V and a hotspot - if you use them.') $ev }
+                Issue $sev (T "$($ev.Count) шт." "$($ev.Count)") (T 'Позначене ⚠ дозволяє іншим пристроям виходити в інтернет або в мережу через цей ПК. Так працюють і власні VPN/проксі для інших ваших пристроїв, і шкідливі програми, що перетворюють ПК на проксі-вузол. Переконайтеся, що налаштовували це самі; чи пропускає порт брандмауер, показує перевірка «Програми, що приймають з''єднання».' 'What is marked ⚠ lets other devices reach the internet or the network through this PC. That is how your own VPN/proxy for your other devices works - and how malware turns a PC into a proxy node. Make sure you set it up yourself; whether the firewall lets the port through is shown by the "Programs accepting network connections" check.') $ev
+            }
+            Explain = (T 'Щоб ПК став проксі, не потрібна окрема програма зі списку: досить правила пересилання портів у Windows (netsh portproxy), увімкненої маршрутизації або процесу, що слухає типовий порт проксі (SOCKS 1080, HTTP 3128, Tor 9050) для всієї мережі. Ця перевірка шукає саме механізм, а не назву.' 'For a PC to become a proxy no listed program is needed: a Windows port forwarding rule (netsh portproxy), IP routing turned on, or a process listening on a typical proxy port (SOCKS 1080, HTTP 3128, Tor 9050) for the whole network is enough. This check looks for the mechanism, not the name.')
+            Pros = @((T 'Ловить і невідомі програми - за тим, як вони працюють' 'Catches unknown programs too - by how they work'))
+            Cons = @((T 'Правила пересилання часто створюють WSL і засоби розробки - тоді це не загроза' 'Forwarding rules are often created by WSL and development tools - then it is not a threat'))
+            Fix = @{ Steps = @(
+                (T 'Правила пересилання: netsh interface portproxy show all; видалити все зайве: netsh interface portproxy reset (командний рядок від адміністратора).' 'Forwarding rules: netsh interface portproxy show all; remove everything unneeded: netsh interface portproxy reset (administrator command prompt).'),
+                (T 'Для відкритого порту проксі: у налаштуваннях програми вимкніть «Дозволити підключення з локальної мережі» (Allow LAN) або прив''яжіть її до 127.0.0.1.' 'For an open proxy port: in the program''s settings turn off "Allow connections from LAN" or bind it to 127.0.0.1.')
+            ) }
         }
         @{
             Id = 'user-root-certs'; Title = (T 'Сторонні кореневі сертифікати' 'Foreign root certificates')

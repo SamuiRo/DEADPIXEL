@@ -36,6 +36,21 @@
   *Development and AI agents: npm/pnpm install scripts, release-age cooldown, no-approval agent modes and editor
   auto-run, unpinned MCP servers, hidden Unicode in agent rules and skills, commands in the global `.gitconfig`;
   Shai-Hulud indicators; the `npm-hardening` recipe.*
+- Аудит: область **«Ігри й емулятори»** — античіти рівня ядра (Vanguard, Easy Anti-Cheat, BattlEye, Tencent ACE,
+  HoYoverse, GameGuard, FACEIT та інші): які драйвери й служби лишилися, що працює просто зараз і як прибрати
+  штатно; хвости емуляторів і віртуалізації (BlueStacks, Nox, LDPlayer, MEmu, MuMu, GameLoop, емулятор Android Studio,
+  VirtualBox, Google Play Games): драйвери гіпервізора, служби, автозапуск і папки з віртуальними дисками.
+  Запис служби або драйвера зі списку прибирається через карантин, навіть коли його файл на місці.
+  *Games and emulators: kernel-level anti-cheat drivers and emulator/virtualization leftovers, removable through
+  quarantine.*
+- Аудит, «Сліди зламу»: **«ПК як чужий проксі-сервер»** (програми й SDK, що здають канал в оренду: Honeygain, Pawns,
+  EarnApp, Bright Data SDK, Hola, програми ботнету 911 S5 та інші) і **«Пересилання трафіку через ПК»** (правила
+  `netsh portproxy`, маршрутизація IP, ICS, відкриті для мережі порти SOCKS/HTTP-проксі). Перевірки разові й ПК
+  не навантажують. *Proxyware and traffic-forwarding checks.*
+- **`linux/audit.sh`** — аудит для Linux-машин одним файлом без залежностей: оновлення, SSH, брандмауер і відкриті
+  порти, облікові записи й sudo, параметри ядра, AppArmor/SELinux, шифрування диска, cron і автозапуск, токени
+  у відкритих файлах, npm і ШІ-агенти. Лише читає систему; `--json` віддає звіт у форматі аудиту Windows.
+  *A single-file, dependency-free, read-only audit for Linux machines.*
 - Сетап: рецепти `asr-rules` (15 правил ASR, кожне відкочується окремо), `network-protection`, `script-host-off`;
   перші два додано в профіль «Безпека». *Setup recipes: `asr-rules`, `network-protection`, `script-host-off`.*
 

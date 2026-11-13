@@ -7,3 +7,4 @@
 *.md       text eol=crlf
 *.exe      binary
 *.iss      text eol=crlf
+*.sh       text eol=lf

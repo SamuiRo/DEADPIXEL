@@ -18,6 +18,10 @@ $RegAllowed = @(
     # COM-компонент, зареєстрований лише для користувача (Аудит → «Сліди зламу»). Системні (HKLM) - ніколи
     '^HKCU:\\Software\\Classes\\(WOW6432Node\\)?CLSID\\\{[0-9A-Fa-f-]{36}\}$'
 )
+# Служби й драйвери, які можна прибрати, хоча їхній файл на місці: античіти рівня ядра і драйвери емуляторів
+# (Аудит → «Ігри й емулятори»). Лише ці імена - жодної іншої «живої» служби карантин не чіпає.
+# Перелік має збігатися з modules\audit\checks\gaming.ps1
+$DriverServiceAllowed = '(?i)^(vgk|vgc|EasyAntiCheat(_EOS|Sys)?|BEService|BEDaisy|ACE-[A-Z]+\d*|AntiCheatExpert Protection|SGuard(64|Svc64)?|TesSafe|mhyprot[23]?|HoYoProtect|HoYoKProtect|FACEIT|faceit[\w.-]*|ESEADriver\d*|npggsvc|GameMon|npptNT2|xhunter1|xigncode[\w.-]*|EAAntiCheatService|eaanticheat|atvi-randgrid_sr|EQU8_HELPER_\d+|PnkBstr[AB]|HtAntiCheatDriver|BlueStacksDrv(_nxt)?|BstHdDrv|BstkDrv|BstHdLogRotatorSvc|NoxVMSVC|XQHDrv|YSDrv|Ld9BoxSup|LdVBoxDrv|LdBoxDrv|MEmuSVC|MEmuDrv|NemuDrv|NemuVMMDrv|MuMuVMMDrv|MuMuVMMNetAdp|aow_drv|QMEmulatorService|aehd|gvm|IntelHaxm|VBoxSup|VBoxDrv|VBoxNetAdp|VBoxNetLwf|VBoxUSBMon|VBoxSDS|GooglePlayGamesServices)$'
 $RunKeys = '^HK(LM|CU):\\Software\\(WOW6432Node\\)?Microsoft\\Windows\\CurrentVersion\\Run(Once)?$'
 
 # Шлях файлу служби / драйвера з ImagePath
@@ -90,6 +94,14 @@ function Assert-CleanupTarget($it) {
             $img = Resolve-ImagePath (Get-ItemProperty -LiteralPath $k).ImagePath
             if (-not $img -or (Test-InWindows $img)) { throw (T 'служба Windows' 'a Windows service') }
             if (Test-Path -LiteralPath $img) { throw (T 'файл служби існує - це не хвіст' 'the service file exists - not a leftover') }
+        }
+        # Античіт або драйвер емулятора: файл на місці, тому дозволено лише імена зі списку і лише зупинену службу
+        'DriverService' {
+            if ($it.Name -notmatch $DriverServiceAllowed) { throw (T 'ця служба не зі списку античітів і емуляторів' 'this service is not on the anti-cheat and emulator list') }
+            $k = "HKLM:\SYSTEM\CurrentControlSet\Services\$($it.Name)"
+            if (-not (Test-Path -LiteralPath $k)) { throw (T 'служби вже немає' 'the service is already gone') }
+            $state = @(Get-CimInstance Win32_SystemDriver -Filter "Name='$($it.Name)'" -ErrorAction SilentlyContinue) + @(Get-CimInstance Win32_Service -Filter "Name='$($it.Name)'" -ErrorAction SilentlyContinue) | Select-Object -First 1
+            if ($state -and $state.State -eq 'Running') { throw (T 'зараз працює: закрийте гру, лаунчер чи емулятор або перезавантажте ПК' 'it is running now: close the game, launcher or emulator, or restart the PC') }
         }
         'Task' {
             if ($it.Key -like '\Microsoft\*') { throw (T 'завдання Windows' 'a Windows task') }
@@ -182,7 +194,7 @@ function Move-ToQuarantine($it, [string]$dir, [int]$n) {
             Remove-Item -LiteralPath $it.Target -Recurse -Force
             return @{ RegFile = $f }
         }
-        'Service' {
+        { $_ -in 'Service', 'DriverService' } {
             $f = "reg-$n.reg"
             Export-RegKey "HKLM:\SYSTEM\CurrentControlSet\Services\$($it.Name)" (Join-Path $dir $f)
             $code = Invoke-Native sc.exe @('delete', $it.Name)
@@ -281,7 +293,7 @@ function Restore-Quarantine([string]$id) {
                         if ($code -ge 8) { throw "robocopy: $code" }
                     }
                 }
-                { $_ -in 'RegistryKey', 'Service' } {
+                { $_ -in 'RegistryKey', 'Service', 'DriverService' } {
                     $code = Invoke-Native reg.exe @('import', (Join-Path $s.Dir $sv.RegFile))
                     if ($code -ne 0) { throw "reg import: $code" }
                 }
@@ -312,7 +324,7 @@ function Restore-Quarantine([string]$id) {
                     }
                 }
             }
-            $rec.Status = 'RESTORED'; $msg = if ($rec.Kind -eq 'Service') { T 'діє після перезавантаження' 'takes effect after a restart' } else { '' }
+            $rec.Status = 'RESTORED'; $msg = if ($rec.Kind -in 'Service', 'DriverService') { T 'діє після перезавантаження' 'takes effect after a restart' } else { '' }
             $res += [pscustomobject]@{ Label = $rec.Label; Status = 'RESTORED'; Message = $msg }
         } catch {
             $res += [pscustomobject]@{ Label = $rec.Label; Status = 'FAIL'; Message = $_.Exception.Message }

@@ -46,11 +46,19 @@ Three areas cover what the antivirus alone does not:
   scripts, a cooldown for freshly published versions, no-approval modes in Claude Code and Codex, auto-run tasks in
   VS Code/Cursor, MCP servers without a pinned version, invisible characters in agent rules and skills, commands in the
   global `.gitconfig`. Recipe: `npm-hardening`. Only settings files are read; nothing is executed.
+- **Games and emulators** — kernel-level anti-cheats (which drivers remain, what runs right now, how to remove them)
+  and emulator leftovers: hypervisor drivers, services, startup entries, folders with virtual disks. A service or driver
+  entry on the anti-cheat and emulator list can be removed through quarantine while it is not running.
 - **Signs of compromise** — indicators of known incidents (the list lives in `checks/threats.ps1` and grows with releases;
   the first entry is the 2026 NIKKE launcher compromise), per-user COM hijacking, unsigned executables in browser
   profiles, the hosts file, the system proxy, foreign root certificates. Findings are removed through quarantine, which
   has a narrow allowance for them: a per-user COM entry, a single file outside Windows and Program Files, a folder inside
-  a program's AppData folder.
+  a program's AppData folder. The area also covers programs that rent the PC out as a proxy node and traffic
+  forwarding through the PC.
+
+**Linux** — `linux/audit.sh`: the same approach as a single dependency-free file (updates, SSH, firewall, ports, accounts,
+kernel parameters, autostart, tokens, npm and AI agents). Read-only: `./audit.sh`, `sudo ./audit.sh` (more complete),
+`--lang uk`, `--json report.json`, `--area ssh`, `--list`.
 
 **Leftover cleanup goes through quarantine only.** The audit deletes nothing: "Clean up…" hands the selection to the Setup
 engine (`Setup.ps1 -Cleanup`, with UAC). Before each action the engine re-checks that the target is still a leftover and
@@ -78,7 +86,7 @@ A scan takes a few seconds. Reports are in `data\audit\` (`latest.json`, `histor
 
 ```bat
 powershell -File Audit.ps1                      :: all checks; exit code = number of critical and high findings
-powershell -File Audit.ps1 -Area platform       :: one area (platform, windows, hardening, accounts, secrets, devtools, network, processes, threats, software, health, leftovers)
+powershell -File Audit.ps1 -Area platform       :: one area (platform, windows, hardening, accounts, secrets, devtools, network, processes, threats, software, health, leftovers, gaming)
 powershell -File Audit.ps1 -Html report.html    :: the latest report as HTML
 powershell -File Audit.ps1 -Schedule 3          :: automatically every 3 days; 0 turns it off
 powershell -File Audit.ps1 -Check hvci,uac      :: specific checks
