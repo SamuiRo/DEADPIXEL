@@ -328,6 +328,19 @@ namespace DeadPixel
             t.Controls.Add(dataBtn);
             t.SetColumnSpan(dataBtn, 2);
 
+            Heading(t, L.T("Видалення", "Removal"));
+            var removeInfo = new Label { AutoSize = true, MaximumSize = new Size(700, 0), Tag = "muted", Margin = new Padding(3, 4, 3, 4),
+                Text = Uninstaller.IsInstalled
+                    ? L.T("Деінсталятор прибере програму, автозапуск, ярлики й розклад аудиту, а про зібрані дані перепитає.",
+                          "The uninstaller removes the program, autostart, shortcuts and the audit schedule, and asks about collected data.")
+                    : L.T("Portable-версія: прибирає автозапуск, ярлики й розклад аудиту, після чого лишається видалити папку програми.",
+                          "Portable version: removes autostart, shortcuts and the audit schedule; after that only the program folder is left to delete.") };
+            t.Controls.Add(removeInfo);
+            t.SetColumnSpan(removeInfo, 2);
+            var removeBtn = Btn(L.T("Видалити DEADPIXEL…", "Remove DEADPIXEL…"), (o, e) => Uninstaller.Run(app, this));
+            t.Controls.Add(removeBtn);
+            t.SetColumnSpan(removeBtn, 2);
+
             loadingSettings = false;
             scroll.Controls.Add(t);
             return scroll;

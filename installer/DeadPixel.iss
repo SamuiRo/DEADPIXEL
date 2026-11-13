@@ -67,6 +67,10 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\DeadPixel.exe"; Description: "{cm:LaunchProgram,DEADPIXEL}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+; Сліди, які програма створила сама (автозапуск, ярлики, розклад аудиту разом із папкою \DEADPIXEL у Планувальнику)
+Filename: "{app}\DeadPixel.exe"; Parameters: "--remove-traces"; RunOnceId: "RemoveTraces"; Flags: runhidden
+
 [Code]
 // DEADPIXEL не повинен лишати хвостів: прибираємо й те, що програма створила сама, а не інсталятор
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

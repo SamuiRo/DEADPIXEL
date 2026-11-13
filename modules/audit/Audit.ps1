@@ -614,7 +614,11 @@ function Set-Schedule([int]$days) {
 
 function Set-ScheduleCore([int]$days) {
     if (Get-ScheduleTask) { Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false -ErrorAction Stop }
-    if ($days -le 0) { return }
+    if ($days -le 0) {
+        # Порожню папку \DEADPIXEL у Планувальнику теж прибираємо: Unregister-ScheduledTask її лишає
+        try { $svc = New-Object -ComObject Schedule.Service; $svc.Connect(); $svc.GetFolder('\').DeleteFolder($TaskPath.Trim('\'), 0) } catch { }
+        return
+    }
     $gui = Join-Path $PSScriptRoot 'AuditGui.exe'
     if (-not (Test-Path $gui)) { throw ((T 'Не знайдено ' 'Not found: ') + $gui) }
     $action = New-ScheduledTaskAction -Execute $gui -Argument '--background'

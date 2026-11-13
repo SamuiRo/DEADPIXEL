@@ -49,6 +49,8 @@ namespace DeadPixel
             if (args.Length >= 2 && args[0] == "--analyze") { DumpAnalyzer.Run(args[1]); return; }
             if (args.Length >= 1 && args[0] == "--smart") { DiskMonitor.WriteSmartCache(); return; }
             if (args.Length >= 2 && args[0] == "--copydumps") { DiagPack.CopyMinidumps(args[1]); return; }
+            // Тихе прибирання слідів поза папкою програми (деінсталятор; portable — перед видаленням папки вручну)
+            if (args.Length >= 1 && args[0] == "--remove-traces") { Environment.ExitCode = Uninstaller.RemoveTraces(false).Count; return; }
             if (args.Length >= 1 && args[0] == "--shortcuts") { Shortcuts.Set(Shortcuts.Desktop, true); Shortcuts.Set(Shortcuts.StartMenu, true); return; }
 
             bool created;

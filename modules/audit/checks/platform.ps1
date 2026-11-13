@@ -138,15 +138,78 @@ function Get-DeviceGuard {
             Id = 'driver-blocklist'; Title = (T 'Блок-лист вразливих драйверів' 'Vulnerable driver blocklist')
             Test = {
                 $v = Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' 'VulnerableDriverBlocklistEnable'
-                if ($v -eq 1) { return Ok (T 'увімкнено' 'on') }
-                if ($v -eq 0) { return Issue medium (T 'вимкнено' 'off') (T 'Windows дозволяє завантажувати драйвери з відомими вразливостями, якими атакують ядро.' 'Windows allows loading drivers with known vulnerabilities that are used to attack the kernel.') }
+                # Сам список - файл driversipolicy.p7b; Microsoft оновлює його разом з оновленнями Windows
+                $ev = @()
+                $list = Get-Item -LiteralPath (Join-Path $env:windir 'System32\CodeIntegrity\driversipolicy.p7b') -ErrorAction SilentlyContinue
+                if ($list) { $ev += (T 'Список оновлено: ' 'List updated: ') + $list.LastWriteTime.ToString('dd.MM.yyyy') }
+                if ($v -eq 1) { return Ok (T 'увімкнено' 'on') '' $ev }
+                if ($v -eq 0) { return Issue medium (T 'вимкнено' 'off') (T 'Windows дозволяє завантажувати драйвери з відомими вразливостями, якими атакують ядро.' 'Windows allows loading drivers with known vulnerabilities that are used to attack the kernel.') $ev }
                 # Не налаштовано явно: з Windows 11 22H2 блок-лист типово увімкнений
-                if ((Get-OsInfo).Build -ge 22621) { Ok (T 'увімкнено (типово)' 'on (default)') } else { Issue medium (T 'не налаштовано' 'not configured') (T 'У цій версії Windows блок-лист типово вимкнений.' 'In this Windows version the blocklist is off by default.') }
+                if ((Get-OsInfo).Build -ge 22621) { Ok (T 'увімкнено (типово)' 'on (default)') '' $ev } else { Issue medium (T 'не налаштовано' 'not configured') (T 'У цій версії Windows блок-лист типово вимкнений.' 'In this Windows version the blocklist is off by default.') $ev }
             }
             Explain = (T 'Microsoft веде список легітимних, але вразливих драйверів (старі утиліти розгону, моніторингу, анти-читів), через які шкідливі програми отримують доступ до ядра. Блок-лист забороняє їх завантажувати.' 'Microsoft keeps a list of legitimate but vulnerable drivers (old overclocking, monitoring and anti-cheat utilities) that malware uses to reach the kernel. The blocklist prevents them from loading.')
             Pros = @((T 'Закриває популярний спосіб атаки «принеси свій вразливий драйвер» (BYOVD)' 'Closes the popular "bring your own vulnerable driver" (BYOVD) attack'))
             Cons = @((T 'Зрідка блокує старий драйвер легітимної програми - її потрібно оновити' 'Occasionally blocks an old driver of a legitimate program - it needs updating'))
             Fix = @{ Recipe = 'driver-blocklist' }
+        }
+        @{
+            Id = 'app-control'; Title = (T 'Політики App Control (WDAC) і Smart App Control' 'App Control (WDAC) policies and Smart App Control')
+            Test = {
+                $sac = switch (Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' 'VerifiedAndReputablePolicyState') {
+                    1 { T 'увімкнено' 'on' } 2 { T 'режим оцінювання' 'evaluation mode' } default { T 'вимкнено' 'off' }
+                }
+                $value = "Smart App Control: $sac"
+                $ciDir = Join-Path $env:windir 'System32\CodeIntegrity'
+                $foreign = @(); $audit = @(); $ev = @()
+                # Старий формат (одна політика на ПК): Microsoft його на домашніх ПК не використовує
+                if (Test-Path -LiteralPath (Join-Path $ciDir 'SiPolicy.p7b')) { $foreign += (T 'SiPolicy.p7b (політика старого формату)' 'SiPolicy.p7b (legacy-format policy)') }
+                $precise = $false
+                if (Test-Admin) {
+                    try {
+                        $j = (& citool.exe -lp -json 2>$null | Out-String) | ConvertFrom-Json
+                        foreach ($p in @($j.Policies)) {
+                            if ($p.IsSystemPolicy) { continue }
+                            $line = "$($p.FriendlyName) {$($p.PolicyID)}" + $(if ($p.IsSignedPolicy) { T ', підписана' ', signed' } else { T ', без підпису' ', unsigned' })
+                            if ($p.IsEnforced) { $foreign += $line } else { $audit += $line }
+                        }
+                        $precise = [bool]$j.Policies
+                    } catch { }
+                }
+                if (-not $precise) {
+                    # Без прав адміністратора citool не відповідає: звіряємо файли політик зі списком системних від Microsoft
+                    $system = '0283ac0f-fff1-49ae-ada1-8a933130cad6', '1283ac0f-fff1-49ae-ada1-8a933130cad6', '784c4414-79f4-4c32-a6a5-f0fb42a51d0d',
+                              '82443e1e-8a39-4b4a-96a8-f40ddc00b9f3', 'cdd5cb55-db68-4d71-aa38-3df2b6473a52', '5951a96a-e0b5-4d3d-8fb8-3e5b61030784',
+                              '1678656c-05ef-481f-bc5b-ebd8c991502d', '2678656c-05ef-481f-bc5b-ebd8c991502d', '5dac656c-21ad-4a02-ab49-649917162e70',
+                              'd2bda982-ccf6-4344-ac5b-0b44427b6816', '0939ed82-bfd5-4d32-b58e-d31d3c49715a', '1939ed82-bfd5-4d32-b58e-d31d3c49715a',
+                              '8f9cb695-5d48-48d6-a329-7202b44607e3', 'a072029f-588b-4b5e-b7f9-05aad67df687', '60fd87f8-4593-44a0-91b0-2e0da022f248'
+                    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $ciDir 'CiPolicies\Active') -Filter '*.cip' -ErrorAction SilentlyContinue)) {
+                        if ($system -notcontains $f.BaseName.Trim('{}').ToLower()) { $audit += "$($f.Name), " + $f.LastWriteTime.ToString('dd.MM.yyyy') }
+                    }
+                }
+                if ($foreign) {
+                    return Issue medium ((T "сторонніх політик: $($foreign.Count), " "third-party policies: $($foreign.Count), ") + $value) (T 'На ПК діє політика App Control, якої немає серед системних від Microsoft: вона вирішує, які програми і драйвери можна запускати. На робочому ПК її ставить адміністратор організації. На домашньому, якщо ви її не створювали, - це привід для перевірки: такими політиками зловмисники блокують антивірус.' 'An App Control policy that is not one of Microsoft''s system policies is enforced on this PC: it decides which programs and drivers may run. On a work PC the organization''s administrator installs it. On a home PC, if you did not create it, investigate: attackers use such policies to block antivirus software.') ($foreign + $audit)
+                }
+                if ($audit) {
+                    $r = Issue low ((T "невідомих політик: $($audit.Count), " "unknown policies: $($audit.Count), ") + $value) $(if ($precise) { T 'Є стороння політика App Control у режимі аудиту: вона нічого не блокує, лише пише в журнал.' 'There is a third-party App Control policy in audit mode: it blocks nothing and only writes to the log.' } else { T 'У папці політик є файл, якого немає у списку системних політик Microsoft. Запустіть аудит з правами адміністратора - тоді Windows сама скаже, чия це політика і чи вона діє.' 'The policy folder has a file that is not on the list of Microsoft system policies. Run the audit as administrator - Windows will then say whose policy it is and whether it is enforced.' }) $audit
+                    return $(if ($precise) { $r } else { Limited $r })
+                }
+                $r = Ok $value (T 'Діють лише системні політики Microsoft.' 'Only Microsoft system policies are in effect.') $ev
+                if ($precise) { $r } else { Limited $r }
+            }
+            Explain = (T 'App Control for Business (раніше WDAC) - механізм Windows, який дозволяє запускати лише програми і драйвери з дозволеного списку. Це інструмент для організацій: повна політика на домашньому ПК вимагає постійного супроводу і легко ламає ігри, драйвери та інструменти розробки, тому DEADPIXEL її не вмикає, а лише стежить, щоб на ПК не з''явилося чужої політики. Smart App Control - спрощений варіант для дому: Windows блокує програми без підпису і без репутації у хмарі Microsoft.' 'App Control for Business (formerly WDAC) is the Windows mechanism that lets only allow-listed programs and drivers run. It is a tool for organizations: a full policy on a home PC needs constant upkeep and easily breaks games, drivers and development tools, so DEADPIXEL does not turn it on and only watches that no foreign policy appears. Smart App Control is the simplified home variant: Windows blocks programs that are unsigned and have no reputation in the Microsoft cloud.')
+            Pros = @(
+                (T 'Чужа політика App Control - рідкісний, але реальний спосіб вимкнути захист ПК; перевірка це помітить' 'A foreign App Control policy is a rare but real way to switch off PC protection; this check notices it'),
+                (T 'Smart App Control зупиняє невідомі програми ще до запуску - корисно тим, хто ставить лише відоме ПЗ' 'Smart App Control stops unknown programs before they start - useful if you install only well-known software')
+            )
+            Cons = @(
+                (T 'Smart App Control блокує власноруч зібрані й непідписані програми (зокрема інструменти розробника і сам DEADPIXEL), а винятків не має' 'Smart App Control blocks self-built and unsigned programs (developer tools and DEADPIXEL itself included) and has no exceptions'),
+                (T 'Рішення ухвалює хмара Microsoft; у частині версій Windows вимкнений Smart App Control можна ввімкнути лише перевстановленням системи' 'The verdict comes from the Microsoft cloud; in some Windows versions Smart App Control, once off, can be turned on only by reinstalling the system')
+            )
+            Fix = @{ Open = 'windowsdefender://appbrowser'; Steps = @(
+                (T 'Сторонню політику, якої ви не ставили: запустіть аудит від адміністратора, щоб побачити її назву, і перевірте ПК повним та автономним скануванням Defender.' 'A third-party policy you did not install: run the audit as administrator to see its name, and check the PC with a full and an offline Defender scan.'),
+                (T 'Переглянути всі політики: citool.exe -lp у командному рядку від адміністратора. Видалити свою тестову: citool.exe -rp "{ID політики}" і перезавантаження.' 'List all policies: citool.exe -lp in an administrator command prompt. Remove your own test policy: citool.exe -rp "{policy ID}", then restart.'),
+                (T 'Smart App Control (за бажанням): «Безпека Windows» → «Керування програмами і браузером». Розробникам і тим, хто користується непідписаними утилітами, краще лишити вимкненим.' 'Smart App Control (optional): Windows Security → App & browser control. Developers and users of unsigned utilities are better off leaving it off.')
+            ) }
         }
         @{
             Id = 'bitlocker'; Title = (T 'Шифрування системного диска' 'System disk encryption')

@@ -40,6 +40,9 @@ Get-ChildItem (Join-Path $root 'modules') -Recurse -File | Where-Object {
     New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
     Copy-Item $_.FullName $dest
 }
+# Аудит для Linux-машин домашньої мережі: один файл, копіюється на них як є
+New-Item -ItemType Directory (Join-Path $stage 'linux') | Out-Null
+Copy-Item (Join-Path $root 'linux\audit.sh') (Join-Path $stage 'linux')
 foreach ($exe in 'DeadPixel.exe', 'modules\setup\SetupGui.exe', 'modules\audit\AuditGui.exe') {
     if (-not (Test-Path (Join-Path $stage $exe))) { throw "Немає $exe — збірка не вдалася?" }
 }

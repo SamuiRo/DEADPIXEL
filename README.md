@@ -235,6 +235,16 @@ Every commit to `master` and every GitHub PR is also built and script syntax is 
 
 `--show` opens the panel, `--settings` the settings, `--page=Диски` a specific tab (the internal tab key; with the English UI the caption works too: `--page=Disks`).
 `--shortcuts` creates shortcuts on the desktop and in the Start menu.
+`--remove-traces` silently removes traces outside the program folder (autostart, shortcuts, audit schedule).
+
+## Uninstalling
+
+- **Installer** — Windows "Apps" or "Settings → Remove DEADPIXEL…": the uninstaller removes the program, autostart,
+  shortcuts and the audit schedule, and asks about collected data.
+- **Portable** — "Settings → Remove DEADPIXEL…" (or `DeadPixel.exe --remove-traces`): removes autostart, shortcuts
+  and the scheduled task and asks about data; after that only the program folder is left to delete.
+- Entries of another DEADPIXEL copy (in a different folder) are left alone. Changes made by Setup recipes are Windows
+  settings and stay: revert them in "PC setup" before uninstalling if you want to.
 Internal (launched by the app itself with UAC): `--analyze <dump>`, `--smart`, `--copydumps <dir>`.
 
 ## Data and privacy

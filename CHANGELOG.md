@@ -55,8 +55,22 @@
   *A single-file, dependency-free, read-only audit for Linux machines.*
 - Сетап: рецепти `asr-rules` (15 правил ASR, кожне відкочується окремо), `network-protection`, `script-host-off`;
   перші два додано в профіль «Безпека». *Setup recipes: `asr-rules`, `network-protection`, `script-host-off`.*
+- Аудит, «Захист платформи»: **«Політики App Control (WDAC) і Smart App Control»** — стан Smart App Control і
+  сторонні політики App Control, яких немає серед системних від Microsoft (такими політиками зловмисники блокують
+  антивірус). Повну політику App Control DEADPIXEL свідомо не вмикає: на домашньому ПК вона ламає більше, ніж
+  захищає. У «Блок-листі вразливих драйверів» видно дату оновлення списку.
+  *App Control (WDAC) policies and Smart App Control: Smart App Control state and third-party policies; the driver
+  blocklist check shows when the list was last updated.*
+- **Видалення DEADPIXEL** — «Налаштування → Видалити DEADPIXEL…». Portable-версія прибирає за собою автозапуск,
+  ярлики й розклад аудиту (разом із папкою в Планувальнику) і перепитує про зібрані дані; встановлена — запускає
+  деінсталятор. Те саме тихо: `DeadPixel.exe --remove-traces`.
+  *Removing DEADPIXEL from Settings: the portable version cleans up its autostart, shortcuts and audit schedule;
+  the installed one starts the uninstaller.*
 
 ### Змінено
+- Вимкнення розкладу аудиту прибирає й порожню папку `\DEADPIXEL` у Планувальнику завдань; у portable-архів
+  додано `linux/audit.sh`. *Turning the audit schedule off also removes the empty Task Scheduler folder; the
+  portable archive now includes `linux/audit.sh`.*
 - Карантин приймає сліди загроз: COM-запис користувача (`HKCU\Software\Classes\CLSID\{…}`), окремий файл поза Windows
   і Program Files, папку всередині папки програми в AppData. Решта обмежень без змін.
   *Quarantine accepts threat traces: a per-user COM entry, a single file outside Windows and Program Files, a folder
