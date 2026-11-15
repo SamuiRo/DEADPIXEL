@@ -3,7 +3,7 @@
 [Українська](README.uk.md) · **English**
 
 Diagnostics for crash restarts, graphics driver hangs and disk problems on Windows 10/11 — plus a security and
-health audit and recipe-based PC setup.
+health audit and recipe-based PC setup that can be reverted.
 
 ## What's inside
 
@@ -13,7 +13,52 @@ health audit and recipe-based PC setup.
 | `DeadPixel.ps1` / `DeadPixel.cmd` | One-off HTML/TXT report for the last N days (`DeadPixel.cmd -Days 60`) |
 | `src/` | Tray app source code (C# 5, .NET Framework 4.5+) |
 | `build.cmd` | Builds `DeadPixel.exe` and the module GUIs with the compiler that ships with Windows — no Visual Studio or SDK |
-| `modules/` | On-demand modules — separate processes the tray only launches (see below) |
+| `modules/` | On-demand modules — separate processes the tray only launches: `audit` (the audit) and `setup` (recipes, quarantine) |
+| `linux/audit.sh` | A single-file security audit for Linux machines (Debian/Ubuntu, Arch, Fedora) |
+| `installer/`, `tools/Package.ps1` | The Inno Setup installer and release packaging (zip, installer, checksums) |
+| `CHANGELOG.md` | What changed in each version |
+
+## How to use it
+
+**Installing.** From the [Releases](https://github.com/SamuiRo/DEADPIXEL/releases) page take the installer (per user,
+asks for no admin rights) or the portable archive — unpack it anywhere and run `DeadPixel.exe`. The program is not
+code-signed yet, so SmartScreen warns on first launch: "More info" → "Run anyway". Verify the files against
+`SHA256SUMS.txt`.
+
+**First run.** A pixel icon appears in the tray: orange — all good, yellow — a warning, red — a new failure you have
+not looked at yet. The icon menu: "Open dashboard", "System audit…", "PC setup (recipes)…", "Settings…". Turn on
+"Start with Windows" in the settings right away: the black box is only useful when it records all the time.
+
+**The PC freezes, the screen goes black or it restarts:**
+1. Leave DEADPIXEL running in the background — every few seconds it records GPU and CPU state and watches the
+   Windows logs.
+2. After a failure open the dashboard → "Crashes": what was happening in the last minutes before each one. "Analysis"
+   looks for patterns, "Changes" shows which drivers and updates were installed before the trouble began.
+3. A blue screen or a graphics driver hang — "Analyze BSOD dump" / "Analyze TDR dump" on the "Crashes" tab
+   (needs WinDbg; the app offers to install it).
+4. "PC setup" → the "Stability" profile: PCIe and disk power settings and scenarios for the graphics card (clean
+   driver install, power test, BIOS).
+5. Need someone else's help — "Build diagnostics package" at the bottom of the dashboard: one archive with the report
+   and dumps.
+
+**Checking the PC's security:**
+1. Tray → "System audit…" → "Scan". For the full picture — "Scan as administrator".
+2. Go down the list (most dangerous first). Every finding says what it is, the pros and cons of fixing it, and the
+   evidence.
+3. "Fix…" opens the recipe in "PC setup", which shows exactly what will change and has "Revert". "Open in Windows"
+   leads to the right settings window. What you leave on purpose — "Ignore".
+4. Leftovers of removed programs, anti-cheat drivers, signs of compromise — "Clean up…": the selection moves to
+   quarantine, from where it can be restored ("Quarantine…").
+5. "Schedule…" turns on an automatic scan every few days; the tray notifies only about new serious findings.
+
+**Setting up a new PC or hardening one** — "PC setup" → a profile ("New PC", "Security", "Stability", "Crash
+diagnostics") → "Check" shows what differs from the recommendation → "Apply". Old values are saved and "Revert"
+restores exactly those. Read the cons in the hints before applying: some protection (Memory Integrity, ASR rules)
+can get in the way of old drivers and programs.
+
+**Linux machines** — copy `linux/audit.sh` to the machine and run `sudo ./audit.sh`. The script only reads the system.
+
+**Removing DEADPIXEL** — "Settings → Remove DEADPIXEL…" (details in "Uninstalling").
 
 ## Modules
 
@@ -28,13 +73,16 @@ from most to least dangerous, and for the selected one — what it is, pros, con
 settings window, "Scan with Defender" checks suspicious files (without deleting), "Ignore" is a deliberate choice that no
 longer counts toward the score.
 
-Areas: platform protection, Windows protection, accounts, network (who accepts connections and whether the firewall lets
+Areas: platform protection (UEFI, Secure Boot, TPM, VBS, memory integrity, LSA, the vulnerable driver blocklist,
+App Control policies and Smart App Control, disk encryption, BIOS age), Windows protection (antivirus, firewall, UAC,
+SmartScreen, updates), accounts, network (who accepts connections and whether the firewall lets
 them through), processes and startup (suspicious processes, Startup, Task Scheduler, services whose files any program can
-replace, IFEO, WMI), programs and drivers (outdated versions via winget, unsupported programs, drivers), system health
+replace, IFEO, WMI), programs and drivers (versions with known vulnerabilities, outdated versions via winget,
+unsupported programs, drivers), system health
 (free space, disks, restarts, restore points), program leftovers (services, tasks, drivers, PATH, firewall, startup,
 context menu, installed-program entries, folders with no program, old drivers in the driver store).
 
-Three areas cover what the antivirus alone does not:
+Five more areas cover what the antivirus alone does not:
 - **Hardening** — attack surface reduction (ASR) rules, Defender network protection, ransomware protection for folders,
   antivirus exclusions, full scan age, Windows Script Host. Recipes: `asr-rules`, `network-protection`, `script-host-off`.
 - **Passwords and secrets** — what a password stealer would take from the PC: passwords and cards saved in browsers
@@ -48,7 +96,9 @@ Three areas cover what the antivirus alone does not:
   global `.gitconfig`. Recipe: `npm-hardening`. Only settings files are read; nothing is executed.
 - **Games and emulators** — kernel-level anti-cheats (which drivers remain, what runs right now, how to remove them)
   and emulator leftovers: hypervisor drivers, services, startup entries, folders with virtual disks. A service or driver
-  entry on the anti-cheat and emulator list can be removed through quarantine while it is not running.
+  entry on the anti-cheat and emulator list can be removed through quarantine while it is not running. Services are
+  read straight from the registry, so entries that neither "Services" nor `sc` show — the typical leftover of a removed
+  game's driver — are visible too.
 - **Signs of compromise** — indicators of known incidents (the list lives in `checks/threats.ps1` and grows with releases;
   the first entry is the 2026 NIKKE launcher compromise), per-user COM hijacking, unsigned executables in browser
   profiles, the hosts file, the system proxy, foreign root certificates. Findings are removed through quarantine, which
@@ -67,11 +117,14 @@ services as .reg, tasks as XML, firewall rules with all their parameters. "Quara
 `-Restore <session>`) puts everything back; `-Purge <session>` deletes for good, but not earlier than 30 days later.
 Never touched: the Windows folder, the roots of Program Files/ProgramData/AppData, Microsoft folders and folders of running
 programs, registry keys outside installed-program entries and context menu handlers, tasks under `\Microsoft\`.
+A driver or service entry whose file is still in place is removed only for names on the anti-cheat and emulator list,
+and only while the driver is not running.
 
 **Schedule** — "Schedule…": the scheduled task `\DEADPIXEL\DEADPIXEL Audit` runs `AuditGui.exe --background` every N days
 (no windows, low priority, with standard user rights — the exe lives in a user-writable folder, so running it elevated on a
-schedule would be a hole). Creating the task asks for UAC once; without admin rights other users' processes and WMI
-subscriptions are not visible, so those checks are marked as limited.
+schedule would be a hole). The task is created without UAC (UAC is needed only to replace a task an old version created
+elevated). Without admin rights other users' processes and WMI subscriptions are not visible, so those checks are
+marked as limited. Turning the schedule off removes both the task and the `\DEADPIXEL` folder.
 The tray looks at `data\audit\summary.ini` once a minute and notifies only about **new** critical and high findings;
 clicking opens the audit on that check. Turn it off in the panel: "Settings → Notifications".
 **"HTML report"** saves a page to `reports\` — it contains details about the PC, show it only to people you trust.
@@ -79,7 +132,7 @@ clicking opens the audit on that check. Turn it off in the panel: "Settings → 
 
 **The audit changes nothing** — it only reads the system. Most checks run without admin rights; without them other users'
 and system processes and WMI subscriptions are not visible — then "Scan as administrator" appears.
-A scan takes a few seconds. Reports are in `data\audit\` (`latest.json`, `history\`, `ignore.json`;
+A full scan takes about a minute. Reports are in `data\audit\` (`latest.json`, `history\`, `ignore.json`;
 `sigcache.json` caches verified digital signatures so repeat scans are fast).
 
 **Console** — `modules/audit/Audit.cmd` (elevated, saves the report) or directly:
@@ -115,7 +168,18 @@ more checks were added.
 ### Setup — recipe-based PC setup
 
 A **recipe** is a group of settings for a specific task that can be **checked**, **applied** or **reverted**.
-A **profile** is a set of recipes for a broader goal (`new-pc`, `stability`) plus steps that cannot be automated.
+A **profile** is a set of recipes for a broader goal plus steps that cannot be automated.
+
+| Profile | Purpose | Recipes |
+|---|---|---|
+| `new-pc` | basic setup of a new PC | `pcie-aspm`, `disk-power`, `fast-startup`, `home-network` |
+| `stability` | GPU and disk hangs | `pcie-aspm`, `disk-power`, `fast-startup`, `event-logs`, `gpu-stability` |
+| `security` | kernel and Windows protection | `hvci`, `lsa-protection`, `driver-blocklist`, `uac-default`, `defender-pua`, `asr-rules`, `network-protection`, `npm-hardening`, `smb1-off`, `rdp-hardening`, `remote-registry-off` |
+| `diagnostics` | crash diagnostics | `event-logs`, `diag-tools` |
+
+Recipes outside profiles: `secure-boot` (a step-by-step scenario for turning it on in BIOS), `script-host-off`
+(turn off Windows Script Host), `app-updates` (program updates via winget). The full list with descriptions:
+`Setup.cmd -List`.
 
 A **scenario** is a step-by-step guide in a recipe tab ("Enable ping", "ASPM in BIOS"): manual actions, commands with a ▶
 button, "if the previous command succeeded / failed" conditions, parameters, restarts.
@@ -144,6 +208,10 @@ Setup.cmd -Recipe *                     :: audit the PC against all recipes
 
 The check exit code = the number of deviations (0 — all as desired, 255 — launch error), so a new PC audit can be scripted.
 The GUI calls the same `Setup.ps1` with `-OutFile <json>`: all logic lives in one place, the GUI only shows the result.
+`-Apply` and `-Revert` always need admin rights (`Setup.cmd` asks for UAC itself).
+
+Quarantine (for leftovers from the audit): `Setup.cmd -Quarantine` lists sessions, `-Restore <session>` puts one back,
+`-Purge <session>` deletes it for good (not earlier than 30 days later).
 
 **A new recipe** — a file `modules/setup/recipes/<name>.ps1` (UTF-8 with BOM) returning a hashtable:
 
@@ -216,13 +284,14 @@ Ready-made builds are on the [Releases](https://github.com/SamuiRo/DEADPIXEL/rel
 
 How to release a new version:
 1. Change the number in `VERSION` and describe the changes in `CHANGELOG.md` under `## [X.Y.Z] - date`.
-2. Commit, tag and push: `git tag vX.Y.Z` → `git push origin master --tags`.
+2. Commit, tag and push: `git tag vX.Y.Z` → `git push` → `git push --tags`.
 3. GitHub Actions (`.github/workflows/build.yml`) builds the exe, installer, zip and `SHA256SUMS.txt` and publishes a release
    with the text from `CHANGELOG.md`. If the tag does not match `VERSION`, no release is created.
 
 The same package locally: `powershell -NoProfile -File tools\Package.ps1` → `dist\`
 (the installer only if [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed, otherwise just the zip).
-Every commit to `master` and every GitHub PR is also built and script syntax is checked.
+Every commit to `master` and every GitHub PR is also built and script syntax is checked (PowerShell and
+`linux/audit.sh`).
 
 ## Requirements
 
@@ -236,6 +305,7 @@ Every commit to `master` and every GitHub PR is also built and script syntax is 
 `--show` opens the panel, `--settings` the settings, `--page=Диски` a specific tab (the internal tab key; with the English UI the caption works too: `--page=Disks`).
 `--shortcuts` creates shortcuts on the desktop and in the Start menu.
 `--remove-traces` silently removes traces outside the program folder (autostart, shortcuts, audit schedule).
+Internal (launched by the app itself with UAC): `--analyze <dump>`, `--smart`, `--copydumps <dir>`.
 
 ## Uninstalling
 
@@ -245,11 +315,12 @@ Every commit to `master` and every GitHub PR is also built and script syntax is 
   and the scheduled task and asks about data; after that only the program folder is left to delete.
 - Entries of another DEADPIXEL copy (in a different folder) are left alone. Changes made by Setup recipes are Windows
   settings and stay: revert them in "PC setup" before uninstalling if you want to.
-Internal (launched by the app itself with UAC): `--analyze <dump>`, `--smart`, `--copydumps <dir>`.
+- The quarantine goes with the data: if it holds something you may still need, restore it first.
 
 ## Data and privacy
 
 Everything the app collects lives in `data/` next to the exe (or in `%LOCALAPPDATA%\DeadPixel` if that folder is not
 writable), reports in `reports/`. Both folders are in `.gitignore`: they contain your program names, disk serial numbers
 and PC name. Nothing is sent over the network, except downloading Microsoft symbols during dump analysis and the winget
-update check in the audit.
+update check in the audit. The audit reads only names and addresses (of sites, files, variables) — passwords, tokens
+and keys never reach the report.
